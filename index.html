@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lance Morgan — Meta Ads Dashboard</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #1a1a1a;
+    background: #f5f6f8;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 18px;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .title-block h1 {
+    font-size: 20px; margin: 0 0 3px; font-weight: 700; letter-spacing: -0.02em;
+  }
+  .title-block .sub {
+    color: #6b7280; font-size: 12px;
+  }
+  .title-block .sub b { color: #111827; font-weight: 600; }
+
+  .refresh-btn {
+    appearance: none; border: none; cursor: pointer;
+    background: #111827; color: white;
+    padding: 9px 18px; font-size: 13px; font-weight: 600;
+    border-radius: 8px; letter-spacing: 0.01em;
+    display: inline-flex; align-items: center; gap: 8px;
+    transition: background 0.15s, transform 0.05s;
+  }
+  .refresh-btn:hover { background: #1f2937; }
+  .refresh-btn:active { transform: translateY(1px); }
+  .refresh-btn:disabled { background: #9ca3af; cursor: not-allowed; }
+  .refresh-btn .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #34d399; box-shadow: 0 0 6px rgba(52, 211, 153, 0.6);
+  }
+  .refresh-btn.loading .dot {
+    background: #fbbf24; animation: pulse 1s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+  }
+
+  .columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 22px;
+  }
+  @media (max-width: 800px) { .columns { grid-template-columns: 1fr; } }
+
+  .period {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  }
+  .period h2 {
+    margin: 0 0 14px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6b7280;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .period h2 .date { color: #9ca3af; font-weight: 500; text-transform: none; letter-spacing: 0; font-size: 11px; }
+
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .metric {
+    background: #f9fafb;
+    border-radius: 8px;
+    padding: 11px 13px;
+    border: 1px solid #f1f3f7;
+  }
+  .metric.primary {
+    background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+    border-color: #bfdbfe;
+  }
+  .metric.spend {
+    background: linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%);
+    border-color: #bbf7d0;
+  }
+  .metric-label {
+    font-size: 10px; color: #6b7280; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .metric-value {
+    font-size: 24px; font-weight: 700; color: #111827;
+    margin-top: 3px; letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .metric-sub {
+    font-size: 11px; color: #6b7280; margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+    margin-top: 8px;
+  }
+  th, td {
+    text-align: right;
+    padding: 10px 14px;
+    border-bottom: 1px solid #f1f3f7;
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+  }
+  th:first-child, td:first-child { text-align: left; }
+  thead th {
+    background: #fafbfc;
+    color: #6b7280;
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.total {
+    background: #fafbfc;
+    font-weight: 700;
+  }
+  tbody tr.total td:first-child { color: #111827; }
+  .acct-name { font-weight: 600; color: #111827; }
+  .acct-id { font-size: 10px; color: #9ca3af; font-variant-numeric: tabular-nums; margin-top: 1px; }
+  .err-cell { color: #b91c1c; text-align: left !important; font-size: 12px; }
+
+  .section-title {
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: #6b7280;
+    margin: 24px 0 6px;
+  }
+
+  .status-banner {
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    font-size: 12px;
+  }
+  .status-banner.error {
+    background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;
+    white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+  }
+  .status-banner.stale {
+    background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412;
+  }
+
+  .empty {
+    text-align: center; padding: 60px 0; color: #9ca3af; font-size: 13px;
+  }
+
+  .footnote {
+    margin-top: 22px; color: #9ca3af; font-size: 11px; line-height: 1.6;
+  }
+  .footnote code {
+    background: #f3f4f6; padding: 1px 5px; border-radius: 3px;
+    font-size: 10.5px; color: #4b5563;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="topbar">
+    <div class="title-block">
+      <h1>Lance Morgan — Meta Ads Dashboard</h1>
+      <div class="sub">3 accounts combined. <b>Today</b> &amp; <b>Yesterday</b>. <span id="updated"></span></div>
+    </div>
+    <button id="refresh" class="refresh-btn">
+      <span class="dot"></span>
+      <span class="label">Refresh</span>
+    </button>
+  </div>
+
+  <div id="banner"></div>
+  <div id="content">
+    <div class="empty">Click Refresh to load data…</div>
+  </div>
+
+  <div class="footnote">
+    <b>Mapping</b>: Scheduled Calls = <code>offsite_lead_add_20_s_calls</code> (Lance's Schedule-a-Call lead event).
+    Link Clicks = <code>inline_link_clicks</code>. Data pulled live from Meta Graph API v21.0 directly from your browser.
+    Token is a non-expiring system user token — if it ever gets revoked, replace the value at the top of the &lt;script&gt; tag.
+  </div>
+
+</div>
+
+<script>
+// ============================================================================
+// CONFIG — token & accounts embedded for personal use. Keep this file local.
+// ============================================================================
+const FB_TOKEN = "EAAMo26eNKt4BRRCo6hGCvAKZCEP4YZAuDTFCXmJCAw44eTlhIOBYq4hPgLbZAExvmOZBg94q2gmYndrvDXT7MqqkZASGaAfbwpHNtr5R9hFdPZBxxq95oFtZArt4sxlzvMHhcy2WBt6Qu3tmMTEoZCZANCKoeaHbN8hwYoRq8QMnbqvcwhxnvRQwwTOAOJlIkRDstIAZDZD";
+
+const ACCOUNTS = [
+  { id: "act_10205724653849514", label: "Lance Morgan / Illumany" },
+  { id: "act_24963180843366936", label: "CLH_0048 / CFE" },
+  { id: "act_1040961194625652", label: "CFS 2025 (2)" },
+];
+
+// Event mapping (verified against Lance's pixel)
+const EVT_CALLS = "offsite_lead_add_20_s_calls";
+const EVT_CONTACTS = "offsite_conversion.fb_pixel_custom";
+
+// ============================================================================
+// FETCH + RENDER
+// ============================================================================
+async function fetchInsights(actId, preset) {
+  const url = new URL(`https://graph.facebook.com/v21.0/${actId}/insights`);
+  url.searchParams.set("date_preset", preset);
+  url.searchParams.set("level", "account");
+  url.searchParams.set("fields", "spend,inline_link_clicks,impressions,actions");
+  url.searchParams.set("access_token", FB_TOKEN);
+  const resp = await fetch(url.toString());
+  const json = await resp.json();
+  if (json.error) throw new Error(`${json.error.message} (code ${json.error.code})`);
+  return json.data && json.data[0] ? json.data[0] : null;
+}
+
+function actionValue(actions, type) {
+  if (!actions) return 0;
+  const a = actions.find(x => x.action_type === type);
+  return a ? Number(a.value) || 0 : 0;
+}
+
+function normalise(row) {
+  if (!row) return { spend: 0, link_clicks: 0, impressions: 0, scheduled_calls: 0, contacts: 0 };
+  return {
+    spend: Number(row.spend) || 0,
+    link_clicks: Number(row.inline_link_clicks) || 0,
+    impressions: Number(row.impressions) || 0,
+    scheduled_calls: actionValue(row.actions, EVT_CALLS),
+    contacts: actionValue(row.actions, EVT_CONTACTS),
+  };
+}
+
+async function fetchAll() {
+  const jobs = [];
+  for (const a of ACCOUNTS) {
+    for (const preset of ["today", "yesterday"]) {
+      jobs.push(
+        fetchInsights(a.id, preset)
+          .then(row => ({ id: a.id, preset, data: normalise(row) }))
+          .catch(err => ({ id: a.id, preset, error: err.message }))
+      );
+    }
+  }
+  const results = await Promise.all(jobs);
+  const map = {};
+  for (const r of results) {
+    map[r.id] = map[r.id] || {};
+    map[r.id][r.preset] = r.error ? { error: r.error } : r.data;
+  }
+  return ACCOUNTS.map(a => ({
+    id: a.id,
+    label: a.label,
+    today: map[a.id]?.today || {},
+    yesterday: map[a.id]?.yesterday || {},
+  }));
+}
+
+// ============================================================================
+// FORMATTERS
+// ============================================================================
+function fmtMoney(n) {
+  if (n == null || isNaN(n)) return "—";
+  return "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtInt(n) {
+  if (n == null || isNaN(n)) return "—";
+  return Math.round(n).toLocaleString("en-US");
+}
+function safeDiv(a, b) { return (!b || b === 0) ? null : a / b; }
+
+function combinePeriod(accounts, period) {
+  const t = { spend: 0, link_clicks: 0, impressions: 0, scheduled_calls: 0, contacts: 0 };
+  for (const a of accounts) {
+    const p = a[period] || {};
+    if (p.error) continue;
+    t.spend += p.spend || 0;
+    t.link_clicks += p.link_clicks || 0;
+    t.impressions += p.impressions || 0;
+    t.scheduled_calls += p.scheduled_calls || 0;
+    t.contacts += p.contacts || 0;
+  }
+  return t;
+}
+
+function formatDate(daysAgo) {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+
+// ============================================================================
+// VIEW
+// ============================================================================
+function renderPeriodCard(label, dateStr, t) {
+  const cpc  = safeDiv(t.spend, t.link_clicks);
+  const cpsc = safeDiv(t.spend, t.scheduled_calls);
+  return `
+    <div class="period">
+      <h2>${label}<span class="date">${dateStr}</span></h2>
+      <div class="metrics">
+        <div class="metric spend">
+          <div class="metric-label">Amount Spent</div>
+          <div class="metric-value">${fmtMoney(t.spend)}</div>
+          <div class="metric-sub">${fmtInt(t.impressions)} impressions</div>
+        </div>
+        <div class="metric primary">
+          <div class="metric-label">Scheduled Calls</div>
+          <div class="metric-value">${fmtInt(t.scheduled_calls)}</div>
+          <div class="metric-sub">${cpsc === null ? '— cost / call' : fmtMoney(cpsc) + ' / call'}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Link Clicks</div>
+          <div class="metric-value">${fmtInt(t.link_clicks)}</div>
+          <div class="metric-sub">${cpc === null ? '— cost / click' : fmtMoney(cpc) + ' / click'}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTable(accounts, period) {
+  const rows = accounts.map(a => {
+    const p = a[period] || {};
+    if (p.error) {
+      return `<tr><td><div class="acct-name">${a.label}</div><div class="acct-id">${a.id}</div></td>
+        <td colspan="5" class="err-cell">${p.error}</td></tr>`;
+    }
+    const cpc  = safeDiv(p.spend, p.link_clicks);
+    const cpsc = safeDiv(p.spend, p.scheduled_calls);
+    return `
+      <tr>
+        <td><div class="acct-name">${a.label}</div><div class="acct-id">${a.id}</div></td>
+        <td>${fmtMoney(p.spend)}</td>
+        <td>${fmtInt(p.scheduled_calls)}</td>
+        <td>${cpsc === null ? '—' : fmtMoney(cpsc)}</td>
+        <td>${fmtInt(p.link_clicks)}</td>
+        <td>${cpc === null ? '—' : fmtMoney(cpc)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const t = combinePeriod(accounts, period);
+  const cpc  = safeDiv(t.spend, t.link_clicks);
+  const cpsc = safeDiv(t.spend, t.scheduled_calls);
+
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Account</th>
+          <th>Spend</th>
+          <th>Sched Calls</th>
+          <th>$ / Call</th>
+          <th>Link Clicks</th>
+          <th>$ / Click</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+        <tr class="total">
+          <td>Combined</td>
+          <td>${fmtMoney(t.spend)}</td>
+          <td>${fmtInt(t.scheduled_calls)}</td>
+          <td>${cpsc === null ? '—' : fmtMoney(cpsc)}</td>
+          <td>${fmtInt(t.link_clicks)}</td>
+          <td>${cpc === null ? '—' : fmtMoney(cpc)}</td>
+        </tr>
+      </tbody>
+    </table>
+  `;
+}
+
+function render(accounts) {
+  const todayTotals = combinePeriod(accounts, "today");
+  const yTotals = combinePeriod(accounts, "yesterday");
+  document.getElementById('content').innerHTML = `
+    <div class="columns">
+      ${renderPeriodCard("Today", formatDate(0), todayTotals)}
+      ${renderPeriodCard("Yesterday", formatDate(1), yTotals)}
+    </div>
+    <div class="section-title">Today — per account</div>
+    ${renderTable(accounts, "today")}
+    <div class="section-title">Yesterday — per account</div>
+    ${renderTable(accounts, "yesterday")}
+  `;
+}
+
+function setBanner(html, cls) {
+  const b = document.getElementById('banner');
+  b.innerHTML = html ? `<div class="status-banner ${cls||''}">${html}</div>` : '';
+}
+
+async function refresh() {
+  const btn = document.getElementById('refresh');
+  btn.classList.add('loading');
+  btn.disabled = true;
+  btn.querySelector('.label').textContent = "Refreshing…";
+  setBanner('');
+  const t0 = performance.now();
+  try {
+    const accounts = await fetchAll();
+    render(accounts);
+    const errs = accounts.flatMap(a =>
+      ["today","yesterday"].filter(p => a[p].error).map(p => `${a.label} (${p}): ${a[p].error}`)
+    );
+    if (errs.length) setBanner("Some queries returned errors:\n" + errs.join("\n"), 'error');
+    const ms = (performance.now() - t0);
+    const now = new Date();
+    document.getElementById('updated').textContent =
+      `Live · updated ${now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })} (${(ms/1000).toFixed(1)}s)`;
+  } catch (e) {
+    setBanner("Refresh failed: " + (e.message || e), 'error');
+  } finally {
+    btn.classList.remove('loading');
+    btn.disabled = false;
+    btn.querySelector('.label').textContent = "Refresh";
+  }
+}
+
+document.getElementById('refresh').addEventListener('click', refresh);
+// Auto-load on first open
+refresh();
+</script>
+</body>
+</html>
