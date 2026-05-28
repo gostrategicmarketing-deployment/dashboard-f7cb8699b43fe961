@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Lance Morgan — Meta Ads Dashboard</title>
 <style>
   :root { color-scheme: light; }
@@ -147,6 +150,13 @@
   .bucket-pill.webinar-pill { background: #fef3c7; color: #92400e; }
   .bucket-pill.other-pill   { background: #ede9fe; color: #5b21b6; }
 
+  .conv-type {
+    font-size: 10.5px;
+    color: #9ca3af;
+    font-weight: 500;
+    margin-left: 2px;
+  }
+
   tbody tr.subtotal { background: #fafbfc; }
   tbody tr.subtotal td { border-top: 1px solid #e5e7eb; }
   tbody tr.subtotal.webinar-row td:first-child { color: #92400e; }
@@ -279,7 +289,8 @@
     <b>May Webinar bucket</b>: campaigns whose name contains "May Webinar" (in Illumany account).
     Currently matches <code>TOF | May Webinar | ABO - Copy</code> and <code>TOF | May Webinar | ABO</code>.
     <b>Everything Else</b> = all other campaigns across the 3 accounts.<br>
-    <b>Mapping</b>: Scheduled Calls = <code>offsite_lead_add_20_s_calls</code>.
+    <b>Event mapping</b>: May Webinar uses Meta <code>lead</code> (webinar registrations).
+    Everything Else uses <code>offsite_lead_add_20_s_calls</code> (Schedule-a-Call).
     Link Clicks = <code>inline_link_clicks</code>. Data pulled live from Meta Graph API v21.0 directly from your browser.
   </div>
 
@@ -298,7 +309,8 @@ const ACCOUNTS = [
 ];
 
 // Event mapping (verified against Lance's pixel)
-const EVT_CALLS = "offsite_lead_add_20_s_calls";
+const EVT_CALLS = "offsite_lead_add_20_s_calls";          // Schedule-a-Call (used for "Everything Else")
+const EVT_LEADS = "lead";                                  // Standard Meta Lead event (used for May Webinar registrations)
 const EVT_CONTACTS = "offsite_conversion.fb_pixel_custom";
 
 // May Webinar campaign filter — matches any campaign whose name contains "may webinar"
@@ -343,7 +355,7 @@ function actionValue(actions, type) {
 }
 
 function emptyBucket() {
-  return { spend: 0, link_clicks: 0, impressions: 0, scheduled_calls: 0, contacts: 0 };
+  return { spend: 0, link_clicks: 0, impressions: 0, scheduled_calls: 0, leads: 0, contacts: 0 };
 }
 
 function addRowToBucket(b, row) {
@@ -351,6 +363,7 @@ function addRowToBucket(b, row) {
   b.link_clicks += Number(row.inline_link_clicks) || 0;
   b.impressions += Number(row.impressions) || 0;
   b.scheduled_calls += actionValue(row.actions, EVT_CALLS);
+  b.leads += actionValue(row.actions, EVT_LEADS);
   b.contacts += actionValue(row.actions, EVT_CONTACTS);
 }
 
@@ -359,6 +372,7 @@ function addBucket(dst, src) {
   dst.link_clicks += src.link_clicks;
   dst.impressions += src.impressions;
   dst.scheduled_calls += src.scheduled_calls;
+  dst.leads += src.leads;
   dst.contacts += src.contacts;
 }
 
@@ -441,10 +455,15 @@ function formatDate(daysAgo) {
 // VIEW
 // ============================================================================
 function renderPeriodCard(label, dateStr, t, variant) {
-  // variant = "webinar" | "other"
-  const cpc  = safeDiv(t.spend, t.link_clicks);
-  const cpsc = safeDiv(t.spend, t.scheduled_calls);
-  const cls  = variant === "webinar" ? "webinar" : "other";
+  // variant = "webinar" → primary metric is Leads (registrations)
+  // variant = "other"   → primary metric is Scheduled Calls
+  const cpc = safeDiv(t.spend, t.link_clicks);
+  const isWebinar = variant === "webinar";
+  const convCount = isWebinar ? t.leads : t.scheduled_calls;
+  const convLabel = isWebinar ? "Leads" : "Scheduled Calls";
+  const convUnit  = isWebinar ? "lead"  : "call";
+  const costPerConv = safeDiv(t.spend, convCount);
+  const cls  = isWebinar ? "webinar" : "other";
   return `
     <div class="period ${cls}">
       <h2>${label}<span class="date">${dateStr}</span></h2>
@@ -455,9 +474,9 @@ function renderPeriodCard(label, dateStr, t, variant) {
           <div class="metric-sub">${fmtInt(t.impressions)} impressions</div>
         </div>
         <div class="metric primary">
-          <div class="metric-label">Scheduled Calls</div>
-          <div class="metric-value">${fmtInt(t.scheduled_calls)}</div>
-          <div class="metric-sub">${cpsc === null ? '— cost / call' : fmtMoney(cpsc) + ' / call'}</div>
+          <div class="metric-label">${convLabel}</div>
+          <div class="metric-value">${fmtInt(convCount)}</div>
+          <div class="metric-sub">${costPerConv === null ? '— cost / ' + convUnit : fmtMoney(costPerConv) + ' / ' + convUnit}</div>
         </div>
         <div class="metric">
           <div class="metric-label">Link Clicks</div>
@@ -470,8 +489,6 @@ function renderPeriodCard(label, dateStr, t, variant) {
 }
 
 function renderColumn(label, dateStr, webinarT, otherT, combinedT) {
-  const cpc  = safeDiv(combinedT.spend, combinedT.link_clicks);
-  const cpsc = safeDiv(combinedT.spend, combinedT.scheduled_calls);
   return `
     <div class="period-col">
       <div class="col-header">
@@ -484,7 +501,7 @@ function renderColumn(label, dateStr, webinarT, otherT, combinedT) {
       ${renderPeriodCard(label, dateStr, otherT, "other")}
       <div class="combined-row">
         <span>Combined</span>
-        <span>${fmtMoney(combinedT.spend)} &middot; ${fmtInt(combinedT.scheduled_calls)} calls &middot; ${fmtInt(combinedT.link_clicks)} clicks</span>
+        <span>${fmtMoney(combinedT.spend)} &middot; ${fmtInt(webinarT.leads)} leads &middot; ${fmtInt(otherT.scheduled_calls)} calls &middot; ${fmtInt(combinedT.link_clicks)} clicks</span>
       </div>
     </div>
   `;
@@ -506,14 +523,14 @@ function renderSplitTable(accounts, period) {
 
     if (wHasData) {
       const cpc  = safeDiv(w.spend, w.link_clicks);
-      const cpsc = safeDiv(w.spend, w.scheduled_calls);
+      const cpconv = safeDiv(w.spend, w.leads);
       rows.push(`
         <tr>
           <td rowspan="${(wHasData && oHasData) ? 2 : 1}"><div class="acct-name">${a.label}</div><div class="acct-id">${a.id}</div></td>
           <td><span class="bucket-pill webinar-pill">May Webinar</span></td>
           <td>${fmtMoney(w.spend)}</td>
-          <td>${fmtInt(w.scheduled_calls)}</td>
-          <td>${cpsc === null ? '—' : fmtMoney(cpsc)}</td>
+          <td>${fmtInt(w.leads)} <span class="conv-type">leads</span></td>
+          <td>${cpconv === null ? '—' : fmtMoney(cpconv) + ' / lead'}</td>
           <td>${fmtInt(w.link_clicks)}</td>
           <td>${cpc === null ? '—' : fmtMoney(cpc)}</td>
         </tr>
@@ -521,15 +538,15 @@ function renderSplitTable(accounts, period) {
     }
     if (oHasData || !wHasData) {
       const cpc  = safeDiv(o.spend, o.link_clicks);
-      const cpsc = safeDiv(o.spend, o.scheduled_calls);
+      const cpconv = safeDiv(o.spend, o.scheduled_calls);
       const acctCell = wHasData ? '' : `<td><div class="acct-name">${a.label}</div><div class="acct-id">${a.id}</div></td>`;
       rows.push(`
         <tr>
           ${acctCell}
           <td><span class="bucket-pill other-pill">Everything Else</span></td>
           <td>${fmtMoney(o.spend)}</td>
-          <td>${fmtInt(o.scheduled_calls)}</td>
-          <td>${cpsc === null ? '—' : fmtMoney(cpsc)}</td>
+          <td>${fmtInt(o.scheduled_calls)} <span class="conv-type">calls</span></td>
+          <td>${cpconv === null ? '—' : fmtMoney(cpconv) + ' / call'}</td>
           <td>${fmtInt(o.link_clicks)}</td>
           <td>${cpc === null ? '—' : fmtMoney(cpc)}</td>
         </tr>
@@ -540,12 +557,11 @@ function renderSplitTable(accounts, period) {
   const tW = combinePeriodBucket(accounts, period, "webinar");
   const tO = combinePeriodBucket(accounts, period, "other");
   const tA = combinePeriodBucket(accounts, period, "all");
-  const cpcW  = safeDiv(tW.spend, tW.link_clicks);
-  const cpscW = safeDiv(tW.spend, tW.scheduled_calls);
-  const cpcO  = safeDiv(tO.spend, tO.link_clicks);
-  const cpscO = safeDiv(tO.spend, tO.scheduled_calls);
-  const cpcA  = safeDiv(tA.spend, tA.link_clicks);
-  const cpscA = safeDiv(tA.spend, tA.scheduled_calls);
+  const cpcW    = safeDiv(tW.spend, tW.link_clicks);
+  const cpLeadW = safeDiv(tW.spend, tW.leads);
+  const cpcO    = safeDiv(tO.spend, tO.link_clicks);
+  const cpCallO = safeDiv(tO.spend, tO.scheduled_calls);
+  const cpcA    = safeDiv(tA.spend, tA.link_clicks);
 
   return `
     <table>
@@ -554,8 +570,8 @@ function renderSplitTable(accounts, period) {
           <th>Account</th>
           <th>Bucket</th>
           <th>Spend</th>
-          <th>Sched Calls</th>
-          <th>$ / Call</th>
+          <th>Conversions</th>
+          <th>$ / Conv</th>
           <th>Link Clicks</th>
           <th>$ / Click</th>
         </tr>
@@ -565,24 +581,24 @@ function renderSplitTable(accounts, period) {
         <tr class="subtotal webinar-row">
           <td colspan="2"><b>Combined — May Webinar</b></td>
           <td>${fmtMoney(tW.spend)}</td>
-          <td>${fmtInt(tW.scheduled_calls)}</td>
-          <td>${cpscW === null ? '—' : fmtMoney(cpscW)}</td>
+          <td>${fmtInt(tW.leads)} <span class="conv-type">leads</span></td>
+          <td>${cpLeadW === null ? '—' : fmtMoney(cpLeadW) + ' / lead'}</td>
           <td>${fmtInt(tW.link_clicks)}</td>
           <td>${cpcW === null ? '—' : fmtMoney(cpcW)}</td>
         </tr>
         <tr class="subtotal other-row">
           <td colspan="2"><b>Combined — Everything Else</b></td>
           <td>${fmtMoney(tO.spend)}</td>
-          <td>${fmtInt(tO.scheduled_calls)}</td>
-          <td>${cpscO === null ? '—' : fmtMoney(cpscO)}</td>
+          <td>${fmtInt(tO.scheduled_calls)} <span class="conv-type">calls</span></td>
+          <td>${cpCallO === null ? '—' : fmtMoney(cpCallO) + ' / call'}</td>
           <td>${fmtInt(tO.link_clicks)}</td>
           <td>${cpcO === null ? '—' : fmtMoney(cpcO)}</td>
         </tr>
         <tr class="total">
           <td colspan="2">Grand Total</td>
           <td>${fmtMoney(tA.spend)}</td>
-          <td>${fmtInt(tA.scheduled_calls)}</td>
-          <td>${cpscA === null ? '—' : fmtMoney(cpscA)}</td>
+          <td>${fmtInt(tW.leads)}<span class="conv-type"> leads</span> + ${fmtInt(tO.scheduled_calls)}<span class="conv-type"> calls</span></td>
+          <td>—</td>
           <td>${fmtInt(tA.link_clicks)}</td>
           <td>${cpcA === null ? '—' : fmtMoney(cpcA)}</td>
         </tr>
