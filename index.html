@@ -264,6 +264,70 @@
     background: #f3f4f6; padding: 1px 5px; border-radius: 3px;
     font-size: 10.5px; color: #4b5563;
   }
+
+  /* Total daily budget tracker */
+  .budget-card {
+    background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
+    color: #fff;
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 22px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.12);
+  }
+  .budget-label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: #9ca3af;
+  }
+  .budget-value {
+    font-size: 34px; font-weight: 800; letter-spacing: -0.02em;
+    margin-top: 4px; font-variant-numeric: tabular-nums;
+  }
+  .budget-value.loading { color: #6b7280; font-size: 22px; font-weight: 700; }
+  .budget-per { font-size: 15px; font-weight: 600; color: #9ca3af; margin-left: 6px; }
+  .budget-note { font-size: 11px; color: #9ca3af; margin-top: 5px; }
+  .budget-breakdown {
+    display: flex; flex-wrap: wrap; gap: 8px 18px;
+    margin-top: 12px; padding-top: 11px;
+    border-top: 1px solid rgba(255,255,255,0.12);
+  }
+  .bgt-acct { font-size: 12px; color: #d1d5db; font-variant-numeric: tabular-nums; }
+  .bgt-acct b { color: #fff; font-weight: 600; }
+  .bgt-acct .err { color: #fca5a5; }
+
+  /* Scheduled-call conversion rate tracker (Meta data) */
+  .conv-card {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-left: 3px solid #10b981;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 22px;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  }
+  .conv-head { margin-bottom: 12px; }
+  .conv-title {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: #6b7280;
+  }
+  .conv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 800px) { .conv-grid { grid-template-columns: 1fr; } }
+  .conv-metric {
+    background: linear-gradient(180deg, #f0fdf4 0%, #dcfce7 100%);
+    border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px 14px;
+  }
+  .conv-metric .lbl {
+    font-size: 10px; color: #047857; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    display: flex; justify-content: space-between;
+  }
+  .conv-metric .lbl .day { color: #6b7280; font-weight: 500; }
+  .conv-metric .val {
+    font-size: 28px; font-weight: 800; color: #065f46;
+    margin-top: 3px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+  }
+  .conv-metric .conv-sub {
+    font-size: 11px; color: #6b7280; margin-top: 2px; font-variant-numeric: tabular-nums;
+  }
 </style>
 </head>
 <body>
@@ -281,6 +345,8 @@
   </div>
 
   <div id="banner"></div>
+  <div id="budget"></div>
+  <div id="conv"></div>
   <div id="content">
     <div class="empty">Click Refresh to load data…</div>
   </div>
@@ -615,6 +681,9 @@ function render(accounts) {
   const tOY = combinePeriodBucket(accounts, "yesterday", "other");
   const tAY = combinePeriodBucket(accounts, "yesterday", "all");
 
+  // Scheduled-call conversion rate (Meta): scheduled calls ÷ link clicks.
+  renderConversion(tAToday, tAY);
+
   document.getElementById('content').innerHTML = `
     <div class="columns">
       ${renderColumn("Today",     formatDate(0), tWToday, tOToday, tAToday)}
@@ -624,6 +693,105 @@ function render(accounts) {
     ${renderSplitTable(accounts, "today")}
     <div class="section-title">Yesterday — per account, split by bucket</div>
     ${renderSplitTable(accounts, "yesterday")}
+  `;
+}
+
+// ============================================================================
+// TOTAL DAILY BUDGET TRACKER
+// Sums daily budgets of all ACTIVE campaigns (CBO) + ACTIVE ad sets (ABO).
+// Meta returns budgets in minor units (cents), so divide by 100.
+// No double-counting: CBO campaigns carry the budget and their ad sets have
+// none; ABO campaigns carry none and their ad sets do. Ad sets filtered to
+// effective_status ACTIVE are already excluded when their parent is paused.
+// ============================================================================
+async function pullEdge(actId, edge, fields) {
+  const url = new URL(`https://graph.facebook.com/v21.0/${actId}/${edge}`);
+  url.searchParams.set("fields", fields);
+  url.searchParams.set("effective_status", '["ACTIVE"]');
+  url.searchParams.set("limit", "500");
+  url.searchParams.set("access_token", FB_TOKEN);
+  const rows = [];
+  let next = url.toString();
+  while (next) {
+    const resp = await fetch(next);
+    const json = await resp.json();
+    if (json.error) throw new Error(`${json.error.message} (code ${json.error.code})`);
+    for (const r of (json.data || [])) rows.push(r);
+    next = json.paging && json.paging.next ? json.paging.next : null;
+  }
+  return rows;
+}
+
+async function fetchAccountBudget(actId) {
+  const [camps, adsets] = await Promise.all([
+    pullEdge(actId, "campaigns", "id,name,daily_budget,effective_status"),
+    pullEdge(actId, "adsets", "id,name,daily_budget,effective_status,campaign_id"),
+  ]);
+  let campaignBudget = 0;
+  for (const c of camps) campaignBudget += (Number(c.daily_budget) || 0) / 100;
+  let adsetBudget = 0;
+  for (const a of adsets) adsetBudget += (Number(a.daily_budget) || 0) / 100;
+  return { campaignBudget, adsetBudget, total: campaignBudget + adsetBudget };
+}
+
+async function fetchAllBudgets() {
+  return Promise.all(ACCOUNTS.map(a =>
+    fetchAccountBudget(a.id)
+      .then(b => ({ label: a.label, id: a.id, ...b }))
+      .catch(e => ({ label: a.label, id: a.id, error: e.message, total: 0 }))
+  ));
+}
+
+function renderBudget(perAccount) {
+  const grand = perAccount.reduce((s, b) => s + (b.error ? 0 : b.total), 0);
+  const parts = perAccount.map(a =>
+    a.error
+      ? `<span class="bgt-acct"><b>${a.label}</b>: <span class="err">${a.error}</span></span>`
+      : `<span class="bgt-acct"><b>${a.label}</b>: ${fmtMoney(a.total)}/day</span>`
+  ).join('');
+  document.getElementById('budget').innerHTML = `
+    <div class="budget-card">
+      <div class="budget-label">Total Daily Budget — all active campaigns</div>
+      <div class="budget-value">${fmtMoney(grand)}<span class="budget-per">/ day</span></div>
+      <div class="budget-note">Max the 3 accounts are scheduled to spend per day at current settings (applies to tomorrow and each day budgets stay unchanged). Excludes lifetime-budget ad sets.</div>
+      <div class="budget-breakdown">${parts}</div>
+    </div>
+  `;
+}
+
+// Scheduled-call conversion rate tile, fed entirely by Meta data already
+// fetched: combined scheduled calls ÷ combined link clicks, per period.
+function renderConversion(tToday, tY) {
+  const cell = (label, dateStr, b) => {
+    const calls = b.scheduled_calls || 0;
+    const clicks = b.link_clicks || 0;
+    const rate = clicks > 0 ? (calls / clicks * 100) : null;
+    return `
+      <div class="conv-metric">
+        <div class="lbl"><span>${label}</span><span class="day">${dateStr}</span></div>
+        <div class="val">${rate === null ? "—" : rate.toFixed(2) + "%"}</div>
+        <div class="conv-sub">${fmtInt(calls)} ${calls === 1 ? "call" : "calls"} &divide; ${fmtInt(clicks)} clicks</div>
+      </div>`;
+  };
+  const el = document.getElementById('conv');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="conv-card">
+      <div class="conv-head"><span class="conv-title">Scheduled-Call Conversion Rate — scheduled calls &divide; link clicks</span></div>
+      <div class="conv-grid">
+        ${cell("Today", formatDate(0), tToday)}
+        ${cell("Yesterday", formatDate(1), tY)}
+      </div>
+    </div>
+  `;
+}
+
+function setBudgetLoading() {
+  document.getElementById('budget').innerHTML = `
+    <div class="budget-card">
+      <div class="budget-label">Total Daily Budget — all active campaigns</div>
+      <div class="budget-value loading">Loading…</div>
+    </div>
   `;
 }
 
@@ -638,10 +806,12 @@ async function refresh() {
   btn.disabled = true;
   btn.querySelector('.label').textContent = "Refreshing…";
   setBanner('');
+  setBudgetLoading();
   const t0 = performance.now();
   try {
-    const accounts = await fetchAll();
+    const [accounts, budgets] = await Promise.all([fetchAll(), fetchAllBudgets()]);
     render(accounts);
+    renderBudget(budgets);
     const errs = accounts.flatMap(a =>
       ["today","yesterday"].filter(p => a[p].error).map(p => `${a.label} (${p}): ${a[p].error}`)
     );
