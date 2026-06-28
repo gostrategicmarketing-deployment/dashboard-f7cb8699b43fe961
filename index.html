@@ -285,6 +285,19 @@
   .budget-value.loading { color: #6b7280; font-size: 22px; font-weight: 700; }
   .budget-per { font-size: 15px; font-weight: 600; color: #9ca3af; margin-left: 6px; }
   .budget-note { font-size: 11px; color: #9ca3af; margin-top: 5px; }
+  .budget-split { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 4px; }
+  @media (max-width: 800px) { .budget-split { grid-template-columns: 1fr; gap: 16px; } }
+  .bgt-stat-lbl {
+    font-size: 11px; font-weight: 700; color: #e5e7eb; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .bgt-stat-lbl .tag {
+    font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 2px 6px; border-radius: 4px;
+  }
+  .bgt-stat-lbl .tag.today  { background: rgba(52,211,153,0.18); color: #6ee7b7; }
+  .bgt-stat-lbl .tag.combo  { background: rgba(251,191,36,0.18); color: #fcd34d; }
+  .bgt-stat.future .budget-value { color: #fcd34d; }
   .budget-breakdown {
     display: flex; flex-wrap: wrap; gap: 8px 18px;
     margin-top: 12px; padding-top: 11px;
@@ -495,6 +508,24 @@ function fmtInt(n) {
 }
 function safeDiv(a, b) { return (!b || b === 0) ? null : a / b; }
 
+// Conversion-rate exclusion: any campaign whose NAME contains "webinar".
+// Broader than WEBINAR_NAME_RE (which only matches "may webinar") so the
+// conversion tile stays correct for any future webinar campaign.
+const CONV_EXCLUDE_RE = /webinar/i;
+
+function combineNonWebinarConversion(accounts, period) {
+  const t = emptyBucket();
+  for (const a of accounts) {
+    const p = a[period] || {};
+    if (p.error || !p.rows) continue;
+    for (const r of p.rows) {
+      if (CONV_EXCLUDE_RE.test(r.campaign_name || "")) continue;
+      addRowToBucket(t, r);
+    }
+  }
+  return t;
+}
+
 function combinePeriodBucket(accounts, period, bucket) {
   // bucket = "webinar" | "other" | "all"
   const t = emptyBucket();
@@ -682,7 +713,10 @@ function render(accounts) {
   const tAY = combinePeriodBucket(accounts, "yesterday", "all");
 
   // Scheduled-call conversion rate (Meta): scheduled calls ÷ link clicks.
-  renderConversion(tAToday, tAY);
+  // Excludes ANY campaign whose name contains "webinar" (per request).
+  const tConvToday = combineNonWebinarConversion(accounts, "today");
+  const tConvY = combineNonWebinarConversion(accounts, "yesterday");
+  renderConversion(tConvToday, tConvY);
 
   document.getElementById('content').innerHTML = `
     <div class="columns">
@@ -724,14 +758,26 @@ async function pullEdge(actId, edge, fields) {
 
 async function fetchAccountBudget(actId) {
   const [camps, adsets] = await Promise.all([
-    pullEdge(actId, "campaigns", "id,name,daily_budget,effective_status"),
-    pullEdge(actId, "adsets", "id,name,daily_budget,effective_status,campaign_id"),
+    pullEdge(actId, "campaigns", "id,name,daily_budget,effective_status,start_time"),
+    pullEdge(actId, "adsets", "id,name,daily_budget,effective_status,campaign_id,start_time"),
   ]);
-  let campaignBudget = 0;
-  for (const c of camps) campaignBudget += (Number(c.daily_budget) || 0) / 100;
-  let adsetBudget = 0;
-  for (const a of adsets) adsetBudget += (Number(a.daily_budget) || 0) / 100;
-  return { campaignBudget, adsetBudget, total: campaignBudget + adsetBudget };
+  // An ACTIVE budget-bearing entity whose start_time is still in the future
+  // is "scheduled" (it begins delivering on a later day); otherwise it is
+  // "running today". Only one of campaign (CBO) or ad set (ABO) carries a
+  // daily_budget, so there is no double-counting.
+  const now = Date.now();
+  let runToday = 0, scheduled = 0;
+  const classify = (rows) => {
+    for (const r of rows) {
+      const b = (Number(r.daily_budget) || 0) / 100;
+      if (!b) continue;
+      const started = r.start_time ? new Date(r.start_time).getTime() : 0;
+      if (started > now) scheduled += b; else runToday += b;
+    }
+  };
+  classify(camps);
+  classify(adsets);
+  return { runToday, scheduled, total: runToday + scheduled };
 }
 
 async function fetchAllBudgets() {
@@ -743,17 +789,32 @@ async function fetchAllBudgets() {
 }
 
 function renderBudget(perAccount) {
-  const grand = perAccount.reduce((s, b) => s + (b.error ? 0 : b.total), 0);
-  const parts = perAccount.map(a =>
-    a.error
-      ? `<span class="bgt-acct"><b>${a.label}</b>: <span class="err">${a.error}</span></span>`
-      : `<span class="bgt-acct"><b>${a.label}</b>: ${fmtMoney(a.total)}/day</span>`
-  ).join('');
+  const runGrand = perAccount.reduce((s, b) => s + (b.error ? 0 : b.runToday), 0);
+  const schedGrand = perAccount.reduce((s, b) => s + (b.error ? 0 : b.scheduled), 0);
+  const totalGrand = runGrand + schedGrand;
+  const parts = perAccount.map(a => {
+    if (a.error) return `<span class="bgt-acct"><b>${a.label}</b>: <span class="err">${a.error}</span></span>`;
+    const extra = a.scheduled > 0 ? ` <span style="color:#fcd34d">(+${fmtMoney(a.scheduled)} scheduled)</span>` : '';
+    return `<span class="bgt-acct"><b>${a.label}</b>: ${fmtMoney(a.runToday)}/day${extra}</span>`;
+  }).join('');
+  const schedNote = schedGrand > 0
+    ? `Running today + ${fmtMoney(schedGrand)}/day scheduled to begin on a future date.`
+    : `Nothing scheduled to start later — same as running today.`;
   document.getElementById('budget').innerHTML = `
     <div class="budget-card">
-      <div class="budget-label">Total Daily Budget — all active campaigns</div>
-      <div class="budget-value">${fmtMoney(grand)}<span class="budget-per">/ day</span></div>
-      <div class="budget-note">Max the 3 accounts are scheduled to spend per day at current settings (applies to tomorrow and each day budgets stay unchanged). Excludes lifetime-budget ad sets.</div>
+      <div class="budget-label">Total Daily Budget</div>
+      <div class="budget-split">
+        <div class="bgt-stat">
+          <div class="bgt-stat-lbl"><span class="tag today">Running today</span></div>
+          <div class="budget-value">${fmtMoney(runGrand)}<span class="budget-per">/ day</span></div>
+          <div class="budget-note">Active ad sets &amp; campaigns delivering today across the 3 accounts. Excludes lifetime-budget ad sets.</div>
+        </div>
+        <div class="bgt-stat future">
+          <div class="bgt-stat-lbl"><span class="tag combo">Running + scheduled</span></div>
+          <div class="budget-value">${fmtMoney(totalGrand)}<span class="budget-per">/ day</span></div>
+          <div class="budget-note">${schedNote}</div>
+        </div>
+      </div>
       <div class="budget-breakdown">${parts}</div>
     </div>
   `;
