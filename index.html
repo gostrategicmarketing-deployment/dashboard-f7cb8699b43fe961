@@ -297,7 +297,23 @@
   }
   .bgt-stat-lbl .tag.today  { background: rgba(52,211,153,0.18); color: #6ee7b7; }
   .bgt-stat-lbl .tag.combo  { background: rgba(251,191,36,0.18); color: #fcd34d; }
+  .bgt-stat-lbl .tag.web    { background: rgba(59,130,246,0.18); color: #93c5fd; }
   .bgt-stat.future .budget-value { color: #fcd34d; }
+  .bgt-stat.webinar .budget-value { color: #93c5fd; }
+  .budget-split.three { grid-template-columns: 1fr 1fr 1fr; }
+  @media (max-width: 800px) { .budget-split.three { grid-template-columns: 1fr; } }
+  .budget-total-line { margin-top: 12px; font-size: 13px; color: #cbd5e1; }
+  .budget-details { margin-top: 12px; }
+  .budget-details summary { cursor: pointer; font-size: 13px; color: #9ca3af; user-select: none; }
+  .budget-details summary:hover { color: #e5e7eb; }
+  .bgt-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12.5px; }
+  .bgt-table th, .bgt-table td { text-align: left; padding: 5px 8px; border-bottom: 1px solid rgba(148,163,184,0.12); }
+  .bgt-table th.amt, .bgt-table td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+  .bgt-table td.lvl, .bgt-table td.bkt { color: #9ca3af; }
+  .bgt-table tr.bgt-acct-hd td { font-weight: 700; color: #e5e7eb; background: rgba(148,163,184,0.08); }
+  .bgt-table tr.bkt-webinar td.bkt { color: #93c5fd; }
+  .bgt-table tr.bkt-scheduled td.bkt { color: #fcd34d; }
+  .bgt-table tr.bkt-today td.bkt { color: #6ee7b7; }
   .budget-breakdown {
     display: flex; flex-wrap: wrap; gap: 8px 18px;
     margin-top: 12px; padding-top: 11px;
@@ -756,28 +772,52 @@ async function pullEdge(actId, edge, fields) {
   return rows;
 }
 
+// A budget row counts as WEBINAR if it, or its parent campaign, is a webinar
+// (broad /webinar/i match plus the known WEBINAR_IDS). Webinar spend is pulled
+// out so it never inflates the "running today" number Phil makes decisions on.
+const BUDGET_WEBINAR_RE = /webinar/i;
+function isWebinarBudgetRow(name, campaignId, campaignName) {
+  if (campaignId && WEBINAR_IDS.has(String(campaignId))) return true;
+  if (name && BUDGET_WEBINAR_RE.test(name)) return true;
+  if (campaignName && BUDGET_WEBINAR_RE.test(campaignName)) return true;
+  return false;
+}
+
 async function fetchAccountBudget(actId) {
   const [camps, adsets] = await Promise.all([
     pullEdge(actId, "campaigns", "id,name,daily_budget,effective_status,start_time"),
     pullEdge(actId, "adsets", "id,name,daily_budget,effective_status,campaign_id,start_time"),
   ]);
-  // An ACTIVE budget-bearing entity whose start_time is still in the future
-  // is "scheduled" (it begins delivering on a later day); otherwise it is
-  // "running today". Only one of campaign (CBO) or ad set (ABO) carries a
-  // daily_budget, so there is no double-counting.
+  // Map campaign id -> name so an ad set can inherit its parent's webinar status.
+  const campName = {};
+  for (const c of camps) campName[c.id] = c.name || "";
+  // Each budget-bearing entity lands in exactly one bucket:
+  //   webinar   -> a webinar campaign/ad set (excluded from the decision number)
+  //   scheduled -> ACTIVE but start_time is in the future (starts a later day)
+  //   today     -> everything else actually delivering today
+  // Only one of campaign (CBO) or ad set (ABO) carries a daily_budget, so
+  // there is no double-counting.
   const now = Date.now();
-  let runToday = 0, scheduled = 0;
-  const classify = (rows) => {
+  let runToday = 0, scheduled = 0, webinar = 0;
+  const items = [];
+  const classify = (rows, level) => {
     for (const r of rows) {
       const b = (Number(r.daily_budget) || 0) / 100;
       if (!b) continue;
+      const cId = level === "campaign" ? r.id : r.campaign_id;
+      const cName = level === "campaign" ? (r.name || "") : (campName[r.campaign_id] || "");
       const started = r.start_time ? new Date(r.start_time).getTime() : 0;
-      if (started > now) scheduled += b; else runToday += b;
+      let bucket;
+      if (isWebinarBudgetRow(r.name, cId, cName)) { webinar += b; bucket = "webinar"; }
+      else if (started > now) { scheduled += b; bucket = "scheduled"; }
+      else { runToday += b; bucket = "today"; }
+      items.push({ name: r.name || "(unnamed)", level, budget: b, bucket });
     }
   };
-  classify(camps);
-  classify(adsets);
-  return { runToday, scheduled, total: runToday + scheduled };
+  classify(camps, "campaign");
+  classify(adsets, "adset");
+  items.sort((a, b) => b.budget - a.budget);
+  return { runToday, scheduled, webinar, total: runToday + scheduled + webinar, items };
 }
 
 async function fetchAllBudgets() {
@@ -790,32 +830,68 @@ async function fetchAllBudgets() {
 
 function renderBudget(perAccount) {
   const runGrand = perAccount.reduce((s, b) => s + (b.error ? 0 : b.runToday), 0);
+  const webGrand = perAccount.reduce((s, b) => s + (b.error ? 0 : (b.webinar || 0)), 0);
   const schedGrand = perAccount.reduce((s, b) => s + (b.error ? 0 : b.scheduled), 0);
-  const totalGrand = runGrand + schedGrand;
+  const allGrand = runGrand + webGrand + schedGrand;
+
   const parts = perAccount.map(a => {
     if (a.error) return `<span class="bgt-acct"><b>${a.label}</b>: <span class="err">${a.error}</span></span>`;
-    const extra = a.scheduled > 0 ? ` <span style="color:#fcd34d">(+${fmtMoney(a.scheduled)} scheduled)</span>` : '';
-    return `<span class="bgt-acct"><b>${a.label}</b>: ${fmtMoney(a.runToday)}/day${extra}</span>`;
+    const bits = [`${fmtMoney(a.runToday)}/day`];
+    if (a.webinar > 0) bits.push(`<span style="color:#93c5fd">+${fmtMoney(a.webinar)} webinar</span>`);
+    if (a.scheduled > 0) bits.push(`<span style="color:#fcd34d">+${fmtMoney(a.scheduled)} scheduled</span>`);
+    return `<span class="bgt-acct"><b>${a.label}</b>: ${bits.join(' ')}</span>`;
   }).join('');
+
+  const bucketLabel = { today: 'Running today', webinar: 'Webinar', scheduled: 'Scheduled' };
+  let lineCount = 0;
+  const rowsHtml = perAccount.map(a => {
+    if (a.error || !a.items || !a.items.length) return '';
+    lineCount += a.items.length;
+    const lis = a.items.map(it =>
+      `<tr class="bkt-${it.bucket}"><td>${it.name}</td><td class="lvl">${it.level}</td>`
+      + `<td class="bkt">${bucketLabel[it.bucket]}</td><td class="amt">${fmtMoney(it.budget)}</td></tr>`
+    ).join('');
+    return `<tr class="bgt-acct-hd"><td colspan="4">${a.label} — ${fmtMoney(a.runToday)} today`
+      + `${a.webinar > 0 ? ' / ' + fmtMoney(a.webinar) + ' webinar' : ''}`
+      + `${a.scheduled > 0 ? ' / ' + fmtMoney(a.scheduled) + ' scheduled' : ''}</td></tr>` + lis;
+  }).join('');
+
+  const webNote = webGrand > 0
+    ? `Pulled out so it never inflates your decision number.`
+    : `No active webinar budget right now.`;
   const schedNote = schedGrand > 0
-    ? `Running today + ${fmtMoney(schedGrand)}/day scheduled to begin on a future date.`
-    : `Nothing scheduled to start later — same as running today.`;
+    ? `${fmtMoney(schedGrand)}/day set to begin on a future date.`
+    : `Nothing scheduled to start later.`;
+
   document.getElementById('budget').innerHTML = `
     <div class="budget-card">
       <div class="budget-label">Total Daily Budget</div>
-      <div class="budget-split">
+      <div class="budget-split three">
         <div class="bgt-stat">
-          <div class="bgt-stat-lbl"><span class="tag today">Running today</span></div>
+          <div class="bgt-stat-lbl"><span class="tag today">Running today — excl. webinar</span></div>
           <div class="budget-value">${fmtMoney(runGrand)}<span class="budget-per">/ day</span></div>
-          <div class="budget-note">Active ad sets &amp; campaigns delivering today across the 3 accounts. Excludes lifetime-budget ad sets.</div>
+          <div class="budget-note">The decision number: active ad sets &amp; campaigns delivering today across the 3 accounts, webinar removed. Excludes lifetime-budget ad sets.</div>
+        </div>
+        <div class="bgt-stat webinar">
+          <div class="bgt-stat-lbl"><span class="tag web">Webinar</span></div>
+          <div class="budget-value">${fmtMoney(webGrand)}<span class="budget-per">/ day</span></div>
+          <div class="budget-note">${webNote}</div>
         </div>
         <div class="bgt-stat future">
-          <div class="bgt-stat-lbl"><span class="tag combo">Running + scheduled</span></div>
-          <div class="budget-value">${fmtMoney(totalGrand)}<span class="budget-per">/ day</span></div>
+          <div class="bgt-stat-lbl"><span class="tag combo">Scheduled (future start)</span></div>
+          <div class="budget-value">${fmtMoney(schedGrand)}<span class="budget-per">/ day</span></div>
           <div class="budget-note">${schedNote}</div>
         </div>
       </div>
       <div class="budget-breakdown">${parts}</div>
+      <div class="budget-total-line">All active budget (today + webinar + scheduled): <b>${fmtMoney(allGrand)}/day</b></div>
+      <details class="budget-details">
+        <summary>Show every ad set &amp; campaign (${lineCount} line items)</summary>
+        <table class="bgt-table">
+          <thead><tr><th>Name</th><th>Level</th><th>Bucket</th><th class="amt">Daily $</th></tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </details>
     </div>
   `;
 }
