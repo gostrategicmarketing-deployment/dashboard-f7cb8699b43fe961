@@ -365,7 +365,7 @@
   <div class="topbar">
     <div class="title-block">
       <h1>Lance Morgan — Meta Ads Dashboard</h1>
-      <div class="sub">3 accounts combined, split by <b>May Webinar</b> vs <b>Everything Else</b>. <b>Today</b> &amp; <b>Yesterday</b>. <span id="updated"></span></div>
+      <div class="sub">3 accounts combined, split by <b>Webinar</b> vs <b>Everything Else</b>. <b>Today</b> &amp; <b>Yesterday</b>. <span id="updated"></span></div>
     </div>
     <button id="refresh" class="refresh-btn">
       <span class="dot"></span>
@@ -381,10 +381,10 @@
   </div>
 
   <div class="footnote">
-    <b>May Webinar bucket</b>: campaigns whose name contains "May Webinar" (in Illumany account).
-    Currently matches <code>TOF | May Webinar | ABO - Copy</code> and <code>TOF | May Webinar | ABO</code>.
-    <b>Everything Else</b> = all other campaigns across the 3 accounts.<br>
-    <b>Event mapping</b>: May Webinar uses Meta <code>lead</code> (webinar registrations).
+    <b>Webinar bucket</b>: any campaign OR ad set whose name contains "webinar", anywhere in the name, across all 3 accounts.
+    Same rule drives the spend split, the conversion tile, and the budget tracker.
+    <b>Everything Else</b> = all other campaigns.<br>
+    <b>Event mapping</b>: Webinar uses Meta <code>lead</code> (webinar registrations).
     Everything Else uses <code>offsite_lead_add_20_s_calls</code> (Schedule-a-Call).
     Link Clicks = <code>inline_link_clicks</code>. Data pulled live from Meta Graph API v21.0 directly from your browser.
   </div>
@@ -399,7 +399,6 @@ const FB_TOKEN = "EAAMo26eNKt4BRRCo6hGCvAKZCEP4YZAuDTFCXmJCAw44eTlhIOBYq4hPgLbZA
 
 const ACCOUNTS = [
   { id: "act_10205724653849514", label: "Lance Morgan / Illumany" },
-  { id: "act_24963180843366936", label: "CLH_0048 / CFE" },
   { id: "act_1040961194625652", label: "CFS 2025 (2)" },
 ];
 
@@ -408,10 +407,12 @@ const EVT_CALLS = "offsite_lead_add_20_s_calls";          // Schedule-a-Call (us
 const EVT_LEADS = "lead";                                  // Standard Meta Lead event (used for May Webinar registrations)
 const EVT_CONTACTS = "offsite_conversion.fb_pixel_custom";
 
-// May Webinar campaign filter — matches any campaign whose name contains "may webinar"
-const WEBINAR_NAME_RE = /may\s*webinar/i;
+// ONE webinar rule for the whole dashboard: any campaign OR ad set whose name
+// contains "webinar" anywhere is webinar. Used by the spend/lead buckets, the
+// conversion tile, and the budget tracker so all three always agree.
+const WEBINAR_NAME_RE = /webinar/i;
 // Known explicit IDs (belt-and-suspenders in case name changes mid-period)
-const WEBINAR_IDS = new Set(["52504711566383", "6997649832579"]);
+const WEBINAR_IDS = new Set(["52504711566383", "6997649832579", "52560074845983"]);
 
 function isWebinarCampaign(name, id) {
   if (id && WEBINAR_IDS.has(String(id))) return true;
@@ -524,10 +525,8 @@ function fmtInt(n) {
 }
 function safeDiv(a, b) { return (!b || b === 0) ? null : a / b; }
 
-// Conversion-rate exclusion: any campaign whose NAME contains "webinar".
-// Broader than WEBINAR_NAME_RE (which only matches "may webinar") so the
-// conversion tile stays correct for any future webinar campaign.
-const CONV_EXCLUDE_RE = /webinar/i;
+// Conversion-rate exclusion uses the same single webinar rule as everything else.
+const CONV_EXCLUDE_RE = WEBINAR_NAME_RE;
 
 function combineNonWebinarConversion(accounts, period) {
   const t = emptyBucket();
@@ -608,7 +607,7 @@ function renderColumn(label, dateStr, webinarT, otherT, combinedT) {
         <span class="col-label">${label}</span>
         <span class="col-date">${dateStr}</span>
       </div>
-      <div class="bucket-label webinar-label">May Webinar</div>
+      <div class="bucket-label webinar-label">Webinar</div>
       ${renderPeriodCard(label, dateStr, webinarT, "webinar")}
       <div class="bucket-label other-label">Everything Else</div>
       ${renderPeriodCard(label, dateStr, otherT, "other")}
@@ -640,7 +639,7 @@ function renderSplitTable(accounts, period) {
       rows.push(`
         <tr>
           <td rowspan="${(wHasData && oHasData) ? 2 : 1}"><div class="acct-name">${a.label}</div><div class="acct-id">${a.id}</div></td>
-          <td><span class="bucket-pill webinar-pill">May Webinar</span></td>
+          <td><span class="bucket-pill webinar-pill">Webinar</span></td>
           <td>${fmtMoney(w.spend)}</td>
           <td>${fmtInt(w.leads)} <span class="conv-type">leads</span></td>
           <td>${cpconv === null ? '—' : fmtMoney(cpconv) + ' / lead'}</td>
@@ -692,7 +691,7 @@ function renderSplitTable(accounts, period) {
       <tbody>
         ${rows.join('')}
         <tr class="subtotal webinar-row">
-          <td colspan="2"><b>Combined — May Webinar</b></td>
+          <td colspan="2"><b>Combined — Webinar</b></td>
           <td>${fmtMoney(tW.spend)}</td>
           <td>${fmtInt(tW.leads)} <span class="conv-type">leads</span></td>
           <td>${cpLeadW === null ? '—' : fmtMoney(cpLeadW) + ' / lead'}</td>
@@ -754,10 +753,10 @@ function render(accounts) {
 // none; ABO campaigns carry none and their ad sets do. Ad sets filtered to
 // effective_status ACTIVE are already excluded when their parent is paused.
 // ============================================================================
-async function pullEdge(actId, edge, fields) {
+async function pullEdge(actId, edge, fields, opts) {
   const url = new URL(`https://graph.facebook.com/v21.0/${actId}/${edge}`);
   url.searchParams.set("fields", fields);
-  url.searchParams.set("effective_status", '["ACTIVE"]');
+  if (!(opts && opts.noStatusFilter)) url.searchParams.set("effective_status", '["ACTIVE"]');
   url.searchParams.set("limit", "500");
   url.searchParams.set("access_token", FB_TOKEN);
   const rows = [];
@@ -773,23 +772,28 @@ async function pullEdge(actId, edge, fields) {
 }
 
 // A budget row counts as WEBINAR if it, or its parent campaign, is a webinar
-// (broad /webinar/i match plus the known WEBINAR_IDS). Webinar spend is pulled
-// out so it never inflates the "running today" number Phil makes decisions on.
-const BUDGET_WEBINAR_RE = /webinar/i;
+// (same WEBINAR_NAME_RE / WEBINAR_IDS rule as the rest of the dashboard).
+// Webinar budget is pulled out so it never inflates the "running today"
+// number Phil makes decisions on.
 function isWebinarBudgetRow(name, campaignId, campaignName) {
   if (campaignId && WEBINAR_IDS.has(String(campaignId))) return true;
-  if (name && BUDGET_WEBINAR_RE.test(name)) return true;
-  if (campaignName && BUDGET_WEBINAR_RE.test(campaignName)) return true;
+  if (name && WEBINAR_NAME_RE.test(name)) return true;
+  if (campaignName && WEBINAR_NAME_RE.test(campaignName)) return true;
   return false;
 }
 
 async function fetchAccountBudget(actId) {
-  const [camps, adsets] = await Promise.all([
+  const [camps, adsets, allCamps] = await Promise.all([
     pullEdge(actId, "campaigns", "id,name,daily_budget,effective_status,start_time"),
     pullEdge(actId, "adsets", "id,name,daily_budget,effective_status,campaign_id,start_time"),
+    // Unfiltered name-only pull: an ad set can only inherit its parent's webinar
+    // status if the parent is in the map, and the ACTIVE-filtered campaigns pull
+    // misses parents sitting in IN_PROCESS / WITH_ISSUES / scheduled states.
+    pullEdge(actId, "campaigns", "id,name", { noStatusFilter: true }),
   ]);
   // Map campaign id -> name so an ad set can inherit its parent's webinar status.
   const campName = {};
+  for (const c of allCamps) campName[c.id] = c.name || "";
   for (const c of camps) campName[c.id] = c.name || "";
   // Each budget-bearing entity lands in exactly one bucket:
   //   webinar   -> a webinar campaign/ad set (excluded from the decision number)
