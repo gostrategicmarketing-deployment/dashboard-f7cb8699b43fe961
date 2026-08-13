@@ -365,7 +365,7 @@
   <div class="topbar">
     <div class="title-block">
       <h1>Lance Morgan — Meta Ads Dashboard</h1>
-      <div class="sub">3 accounts combined, split by <b>Webinar</b> vs <b>Everything Else</b>. <b>Today</b> &amp; <b>Yesterday</b>. <span id="updated"></span></div>
+      <div class="sub">2 accounts combined, split by <b>Webinar</b> vs <b>Everything Else</b>. <b>Today</b> &amp; <b>Yesterday</b>. <span id="updated"></span></div>
     </div>
     <button id="refresh" class="refresh-btn">
       <span class="dot"></span>
@@ -381,7 +381,7 @@
   </div>
 
   <div class="footnote">
-    <b>Webinar bucket</b>: any campaign OR ad set whose name contains "webinar", anywhere in the name, across all 3 accounts.
+    <b>Webinar bucket</b>: any campaign OR ad set whose name contains "webinar", anywhere in the name, across both accounts.
     Same rule drives the spend split, the conversion tile, and the budget tracker.
     <b>Everything Else</b> = all other campaigns.<br>
     <b>Event mapping</b>: Webinar uses Meta <code>lead</code> (webinar registrations).
@@ -435,13 +435,49 @@ async function fetchCampaignInsights(actId, preset) {
   const rows = [];
   let next = url.toString();
   while (next) {
-    const resp = await fetch(next);
-    const json = await resp.json();
-    if (json.error) throw new Error(`${json.error.message} (code ${json.error.code})`);
+    const json = await gfetch(next);
     for (const r of (json.data || [])) rows.push(r);
     next = json.paging && json.paging.next ? json.paging.next : null;
   }
   return rows;
+}
+
+// Wraps fetch so a network-layer failure reports WHY instead of the bare
+// "Failed to fetch". Distinguishes a blocked request (ad blocker / extension /
+// offline) from a Meta API rejection (expired token, permissions).
+async function gfetch(u) {
+  let resp;
+  try {
+    resp = await fetch(u);
+  } catch (e) {
+    const isFile = location.protocol === "file:";
+    throw new Error(
+      isFile
+        ? "BLOCKED because this page was opened as a file:// URL. Chrome forbids " +
+          "file:// pages from making cross-origin requests, so the call to " +
+          "graph.facebook.com never left the browser. Serve it over http instead: " +
+          'run "Open Dashboard.command" in this folder, or use the GitHub Pages URL. ' +
+          "(raw: " + e.message + ")"
+        : "BLOCKED: the browser never sent the request to graph.facebook.com. " +
+          "Usual cause is an ad blocker or privacy extension blocking facebook.com, " +
+          "or no internet. Disable the blocker for this page and reload. " +
+          "(raw: " + e.message + ")"
+    );
+  }
+  let json;
+  try {
+    json = await resp.json();
+  } catch (e) {
+    throw new Error(`HTTP ${resp.status} ${resp.statusText} — response was not JSON`);
+  }
+  if (json.error) {
+    const c = json.error.code;
+    const hint = (c === 190 || c === 102)
+      ? " — TOKEN EXPIRED. Generate a new one in Graph API Explorer and replace FB_TOKEN in this file."
+      : "";
+    throw new Error(`${json.error.message} (code ${c})${hint}`);
+  }
+  return json;
 }
 
 function actionValue(actions, type) {
@@ -762,9 +798,7 @@ async function pullEdge(actId, edge, fields, opts) {
   const rows = [];
   let next = url.toString();
   while (next) {
-    const resp = await fetch(next);
-    const json = await resp.json();
-    if (json.error) throw new Error(`${json.error.message} (code ${json.error.code})`);
+    const json = await gfetch(next);
     for (const r of (json.data || [])) rows.push(r);
     next = json.paging && json.paging.next ? json.paging.next : null;
   }
@@ -874,7 +908,7 @@ function renderBudget(perAccount) {
         <div class="bgt-stat">
           <div class="bgt-stat-lbl"><span class="tag today">Running today — excl. webinar</span></div>
           <div class="budget-value">${fmtMoney(runGrand)}<span class="budget-per">/ day</span></div>
-          <div class="budget-note">The decision number: active ad sets &amp; campaigns delivering today across the 3 accounts, webinar removed. Excludes lifetime-budget ad sets.</div>
+          <div class="budget-note">The decision number: active ad sets &amp; campaigns delivering today across both accounts, webinar removed. Excludes lifetime-budget ad sets.</div>
         </div>
         <div class="bgt-stat webinar">
           <div class="bgt-stat-lbl"><span class="tag web">Webinar</span></div>
