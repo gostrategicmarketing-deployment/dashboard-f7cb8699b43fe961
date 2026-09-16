@@ -354,6 +354,12 @@
     font-size: 28px; font-weight: 800; color: #065f46;
     margin-top: 3px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
   }
+  .src-tag {
+    display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 4px;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em; vertical-align: 1px;
+    background: #e0e7ff; color: #3730a3; text-transform: uppercase;
+  }
+  .src-tag.meta { background: #fef3c7; color: #92400e; }
   .conv-metric .conv-sub {
     font-size: 11px; color: #6b7280; margin-top: 2px; font-variant-numeric: tabular-nums;
   }
@@ -385,7 +391,9 @@
     Same rule drives the spend split, the conversion tile, and the budget tracker.
     <b>Everything Else</b> = all other campaigns.<br>
     <b>Event mapping</b>: Webinar uses Meta <code>lead</code> (webinar registrations).
-    Everything Else uses <code>offsite_lead_add_20_s_calls</code> (Schedule-a-Call).
+    Everything Else <b>Scheduled Calls</b> = bookings on the GoHighLevel Book-A-Call calendar, counted on the day they were booked (Mountain time, cancellations included), refreshed about every 5 minutes.
+    If that feed is unavailable or over an hour old, it falls back to the Meta <code>Schedule</code> event ("Website schedules") and is tagged <span class="src-tag meta">Meta</span>.
+    The per-account rows are always Meta schedules, because GHL cannot split a booking by ad account.
     Link Clicks = <code>inline_link_clicks</code>. Data pulled live from Meta Graph API v21.0 directly from your browser.
   </div>
 
@@ -403,9 +411,24 @@ const ACCOUNTS = [
 ];
 
 // Event mapping (verified against Lance's pixel)
-const EVT_CALLS = "offsite_lead_add_20_s_calls";          // Schedule-a-Call (used for "Everything Else")
+// Scheduled calls = Meta "Website schedules" (Schedule standard event). It lives in the
+// `conversions` field, NOT `actions`. Checked 2026-09-16 against GHL calendar bookings
+// (within ~10% daily). The old `offsite_lead_add_20_s_calls` was the server-only Lead
+// event, which does not track bookings.
+const EVT_CALLS = "schedule_website";                      // Website schedules (used for "Everything Else")
 const EVT_LEADS = "lead";                                  // Standard Meta Lead event (used for May Webinar registrations)
 const EVT_CONTACTS = "offsite_conversion.fb_pixel_custom";
+
+// Scheduled calls come from GHL. A GitHub Actions job in this repo counts bookings on
+// the Book-A-Call calendar every ~5 minutes and publishes COUNTS ONLY (no contact data)
+// as bookings.json on the `data` branch; the GHL key never reaches this page. If the file
+// is missing or older than GHL_MAX_AGE_MIN, the tiles fall back to Meta's Schedule event.
+const GHL_BOOKINGS_URLS = [
+  "https://api.github.com/repos/gostrategicmarketing-deployment/dashboard-f7cb8699b43fe961/contents/bookings.json?ref=data",
+  "https://raw.githubusercontent.com/gostrategicmarketing-deployment/dashboard-f7cb8699b43fe961/data/bookings.json",
+];
+const GHL_MAX_AGE_MIN = 60;
+const GHL_STALE_MIN = 15;
 
 // ONE webinar rule for the whole dashboard: any campaign OR ad set whose name
 // contains "webinar" anywhere is webinar. Used by the spend/lead buckets, the
@@ -429,7 +452,7 @@ async function fetchCampaignInsights(actId, preset) {
   const url = new URL(`https://graph.facebook.com/v21.0/${actId}/insights`);
   url.searchParams.set("date_preset", preset);
   url.searchParams.set("level", "campaign");
-  url.searchParams.set("fields", "campaign_id,campaign_name,spend,inline_link_clicks,impressions,actions");
+  url.searchParams.set("fields", "campaign_id,campaign_name,spend,inline_link_clicks,impressions,actions,conversions");
   url.searchParams.set("limit", "500");
   url.searchParams.set("access_token", FB_TOKEN);
   const rows = [];
@@ -480,6 +503,46 @@ async function gfetch(u) {
   return json;
 }
 
+async function fetchGhlBookings() {
+  let lastErr = "no source reachable";
+  for (const base of GHL_BOOKINGS_URLS) {
+    try {
+      const viaApi = base.includes("api.github.com");
+      const resp = await fetch(`${base}${base.includes("?") ? "&" : "?"}cb=${Date.now()}`, {
+        cache: "no-store",
+        headers: viaApi ? { Accept: "application/vnd.github.raw" } : {},
+      });
+      if (!resp.ok) { lastErr = `HTTP ${resp.status}`; continue; }
+      const data = await resp.json();
+      const ageMin = (Date.now() - Date.parse(data.generated_at)) / 60000;
+      if (!data.days || isNaN(ageMin)) { lastErr = "unexpected file format"; continue; }
+      return { ok: true, data, ageMin };
+    } catch (e) {
+      lastErr = e.message;
+    }
+  }
+  return { ok: false, error: lastErr };
+}
+
+// Today / yesterday as YYYY-MM-DD in America/Denver, the timezone of both ad accounts
+// and of bookings.json, so the GHL day lines up with Meta's "today" preset.
+function mtDateKeys() {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Denver" }).format(new Date());
+  const [y, m, d] = today.split("-").map(Number);
+  return { today, yesterday: new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10) };
+}
+
+// GHL booking count for a period, or null when the feed can't be trusted for it.
+function ghlCallsFor(ghl, period) {
+  if (!ghl || !ghl.ok || ghl.ageMin > GHL_MAX_AGE_MIN) return null;
+  const day = ghl.data.days[mtDateKeys()[period]];
+  return day ? day.total : null;
+}
+
+function srcTag(isGhl) {
+  return isGhl ? '<span class="src-tag">GHL</span>' : '<span class="src-tag meta">Meta</span>';
+}
+
 function actionValue(actions, type) {
   if (!actions) return 0;
   const a = actions.find(x => x.action_type === type);
@@ -494,7 +557,7 @@ function addRowToBucket(b, row) {
   b.spend += Number(row.spend) || 0;
   b.link_clicks += Number(row.inline_link_clicks) || 0;
   b.impressions += Number(row.impressions) || 0;
-  b.scheduled_calls += actionValue(row.actions, EVT_CALLS);
+  b.scheduled_calls += actionValue(row.conversions, EVT_CALLS);
   b.leads += actionValue(row.actions, EVT_LEADS);
   b.contacts += actionValue(row.actions, EVT_CONTACTS);
 }
@@ -602,13 +665,13 @@ function formatDate(daysAgo) {
 // ============================================================================
 // VIEW
 // ============================================================================
-function renderPeriodCard(label, dateStr, t, variant) {
+function renderPeriodCard(label, dateStr, t, variant, callsFromGhl) {
   // variant = "webinar" → primary metric is Leads (registrations)
   // variant = "other"   → primary metric is Scheduled Calls
   const cpc = safeDiv(t.spend, t.link_clicks);
   const isWebinar = variant === "webinar";
   const convCount = isWebinar ? t.leads : t.scheduled_calls;
-  const convLabel = isWebinar ? "Leads" : "Scheduled Calls";
+  const convLabel = isWebinar ? "Leads" : "Scheduled Calls" + srcTag(callsFromGhl);
   const convUnit  = isWebinar ? "lead"  : "call";
   const costPerConv = safeDiv(t.spend, convCount);
   const cls  = isWebinar ? "webinar" : "other";
@@ -636,7 +699,7 @@ function renderPeriodCard(label, dateStr, t, variant) {
   `;
 }
 
-function renderColumn(label, dateStr, webinarT, otherT, combinedT) {
+function renderColumn(label, dateStr, webinarT, otherT, combinedT, callsFromGhl) {
   return `
     <div class="period-col">
       <div class="col-header">
@@ -646,7 +709,7 @@ function renderColumn(label, dateStr, webinarT, otherT, combinedT) {
       <div class="bucket-label webinar-label">Webinar</div>
       ${renderPeriodCard(label, dateStr, webinarT, "webinar")}
       <div class="bucket-label other-label">Everything Else</div>
-      ${renderPeriodCard(label, dateStr, otherT, "other")}
+      ${renderPeriodCard(label, dateStr, otherT, "other", callsFromGhl)}
       <div class="combined-row">
         <span>Combined</span>
         <span>${fmtMoney(combinedT.spend)} &middot; ${fmtInt(webinarT.leads)} leads &middot; ${fmtInt(otherT.scheduled_calls)} calls &middot; ${fmtInt(combinedT.link_clicks)} clicks</span>
@@ -655,7 +718,8 @@ function renderColumn(label, dateStr, webinarT, otherT, combinedT) {
   `;
 }
 
-function renderSplitTable(accounts, period) {
+function renderSplitTable(accounts, period, ghlCalls) {
+  const fromGhl = ghlCalls !== null;
   const rows = [];
   for (const a of accounts) {
     const p = a[period] || {};
@@ -693,8 +757,8 @@ function renderSplitTable(accounts, period) {
           ${acctCell}
           <td><span class="bucket-pill other-pill">Everything Else</span></td>
           <td>${fmtMoney(o.spend)}</td>
-          <td>${fmtInt(o.scheduled_calls)} <span class="conv-type">calls</span></td>
-          <td>${cpconv === null ? '—' : fmtMoney(cpconv) + ' / call'}</td>
+          <td>${fmtInt(o.scheduled_calls)} <span class="conv-type">${fromGhl ? 'Meta schedules' : 'calls'}</span></td>
+          <td>${cpconv === null ? '—' : fmtMoney(cpconv) + (fromGhl ? ' / schedule' : ' / call')}</td>
           <td>${fmtInt(o.link_clicks)}</td>
           <td>${cpc === null ? '—' : fmtMoney(cpc)}</td>
         </tr>
@@ -704,6 +768,7 @@ function renderSplitTable(accounts, period) {
 
   const tW = combinePeriodBucket(accounts, period, "webinar");
   const tO = combinePeriodBucket(accounts, period, "other");
+  if (fromGhl) tO.scheduled_calls = ghlCalls;
   const tA = combinePeriodBucket(accounts, period, "all");
   const cpcW    = safeDiv(tW.spend, tW.link_clicks);
   const cpLeadW = safeDiv(tW.spend, tW.leads);
@@ -737,7 +802,7 @@ function renderSplitTable(accounts, period) {
         <tr class="subtotal other-row">
           <td colspan="2"><b>Combined — Everything Else</b></td>
           <td>${fmtMoney(tO.spend)}</td>
-          <td>${fmtInt(tO.scheduled_calls)} <span class="conv-type">calls</span></td>
+          <td>${fmtInt(tO.scheduled_calls)} <span class="conv-type">calls</span>${srcTag(fromGhl)}</td>
           <td>${cpCallO === null ? '—' : fmtMoney(cpCallO) + ' / call'}</td>
           <td>${fmtInt(tO.link_clicks)}</td>
           <td>${cpcO === null ? '—' : fmtMoney(cpcO)}</td>
@@ -755,7 +820,9 @@ function renderSplitTable(accounts, period) {
   `;
 }
 
-function render(accounts) {
+function render(accounts, ghl) {
+  const callsToday = ghlCallsFor(ghl, "today");
+  const callsY = ghlCallsFor(ghl, "yesterday");
   const tWToday = combinePeriodBucket(accounts, "today", "webinar");
   const tOToday = combinePeriodBucket(accounts, "today", "other");
   const tAToday = combinePeriodBucket(accounts, "today", "all");
@@ -767,17 +834,19 @@ function render(accounts) {
   // Excludes ANY campaign whose name contains "webinar" (per request).
   const tConvToday = combineNonWebinarConversion(accounts, "today");
   const tConvY = combineNonWebinarConversion(accounts, "yesterday");
-  renderConversion(tConvToday, tConvY);
+  if (callsToday !== null) { tOToday.scheduled_calls = callsToday; tConvToday.scheduled_calls = callsToday; }
+  if (callsY !== null)     { tOY.scheduled_calls = callsY;         tConvY.scheduled_calls = callsY; }
+  renderConversion(tConvToday, tConvY, callsToday !== null, callsY !== null);
 
   document.getElementById('content').innerHTML = `
     <div class="columns">
-      ${renderColumn("Today",     formatDate(0), tWToday, tOToday, tAToday)}
-      ${renderColumn("Yesterday", formatDate(1), tWY,     tOY,     tAY)}
+      ${renderColumn("Today",     formatDate(0), tWToday, tOToday, tAToday, callsToday !== null)}
+      ${renderColumn("Yesterday", formatDate(1), tWY,     tOY,     tAY,     callsY !== null)}
     </div>
     <div class="section-title">Today — per account, split by bucket</div>
-    ${renderSplitTable(accounts, "today")}
+    ${renderSplitTable(accounts, "today", callsToday)}
     <div class="section-title">Yesterday — per account, split by bucket</div>
-    ${renderSplitTable(accounts, "yesterday")}
+    ${renderSplitTable(accounts, "yesterday", callsY)}
   `;
 }
 
@@ -936,8 +1005,8 @@ function renderBudget(perAccount) {
 
 // Scheduled-call conversion rate tile, fed entirely by Meta data already
 // fetched: combined scheduled calls ÷ combined link clicks, per period.
-function renderConversion(tToday, tY) {
-  const cell = (label, dateStr, b) => {
+function renderConversion(tToday, tY, todayFromGhl, yFromGhl) {
+  const cell = (label, dateStr, b, fromGhl) => {
     const calls = b.scheduled_calls || 0;
     const clicks = b.link_clicks || 0;
     const rate = clicks > 0 ? (calls / clicks * 100) : null;
@@ -945,7 +1014,7 @@ function renderConversion(tToday, tY) {
       <div class="conv-metric">
         <div class="lbl"><span>${label}</span><span class="day">${dateStr}</span></div>
         <div class="val">${rate === null ? "—" : rate.toFixed(2) + "%"}</div>
-        <div class="conv-sub">${fmtInt(calls)} ${calls === 1 ? "call" : "calls"} &divide; ${fmtInt(clicks)} clicks</div>
+        <div class="conv-sub">${fmtInt(calls)} ${calls === 1 ? "call" : "calls"}${srcTag(fromGhl)} &divide; ${fmtInt(clicks)} clicks</div>
       </div>`;
   };
   const el = document.getElementById('conv');
@@ -954,8 +1023,8 @@ function renderConversion(tToday, tY) {
     <div class="conv-card">
       <div class="conv-head"><span class="conv-title">Scheduled-Call Conversion Rate — scheduled calls &divide; link clicks</span></div>
       <div class="conv-grid">
-        ${cell("Today", formatDate(0), tToday)}
-        ${cell("Yesterday", formatDate(1), tY)}
+        ${cell("Today", formatDate(0), tToday, todayFromGhl)}
+        ${cell("Yesterday", formatDate(1), tY, yFromGhl)}
       </div>
     </div>
   `;
@@ -984,17 +1053,27 @@ async function refresh() {
   setBudgetLoading();
   const t0 = performance.now();
   try {
-    const [accounts, budgets] = await Promise.all([fetchAll(), fetchAllBudgets()]);
-    render(accounts);
+    const [accounts, budgets, ghl] = await Promise.all([fetchAll(), fetchAllBudgets(), fetchGhlBookings()]);
+    render(accounts, ghl);
     renderBudget(budgets);
     const errs = accounts.flatMap(a =>
       ["today","yesterday"].filter(p => a[p].error).map(p => `${a.label} (${p}): ${a[p].error}`)
     );
-    if (errs.length) setBanner("Some queries returned errors:\n" + errs.join("\n"), 'error');
+    const fmtTime = d => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    let ghlNote;
+    if (!ghl.ok || ghl.ageMin > GHL_MAX_AGE_MIN) {
+      const why = ghl.ok ? `last update ${Math.round(ghl.ageMin)} min ago` : ghl.error;
+      ghlNote = "GHL bookings unavailable";
+      if (errs.length) setBanner("Some queries returned errors:\n" + errs.join("\n") + `\nGHL bookings unavailable (${why}); Scheduled Calls is showing Meta website schedules.`, 'error');
+      else setBanner(`GHL bookings unavailable (${why}). Scheduled Calls is showing Meta website schedules instead.`, 'stale');
+    } else {
+      ghlNote = `GHL bookings as of ${fmtTime(new Date(ghl.data.generated_at))}` + (ghl.ageMin > GHL_STALE_MIN ? " (stale)" : "");
+      if (errs.length) setBanner("Some queries returned errors:\n" + errs.join("\n"), 'error');
+    }
     const ms = (performance.now() - t0);
     const now = new Date();
     document.getElementById('updated').textContent =
-      `Live · updated ${now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })} (${(ms/1000).toFixed(1)}s)`;
+      `Live · updated ${now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })} (${(ms/1000).toFixed(1)}s) · ${ghlNote}`;
   } catch (e) {
     setBanner("Refresh failed: " + (e.message || e), 'error');
   } finally {
