@@ -417,7 +417,7 @@ const ACCOUNTS = [
 // event, which does not track bookings.
 const EVT_CALLS = "schedule_website";                      // Website schedules (used for "Everything Else")
 const EVT_LEADS = "lead";                                  // Standard Meta Lead event (used for May Webinar registrations)
-const EVT_CONTACTS = "offsite_conversion.fb_pixel_custom";
+const EVT_CONTACTS = "contact_website";            // Website Contact standard event (conversions[])
 
 // Scheduled calls come from GHL. A GitHub Actions job in this repo counts bookings on
 // the Book-A-Call calendar every ~5 minutes and publishes COUNTS ONLY (no contact data)
@@ -559,7 +559,7 @@ function addRowToBucket(b, row) {
   b.impressions += Number(row.impressions) || 0;
   b.scheduled_calls += actionValue(row.conversions, EVT_CALLS);
   b.leads += actionValue(row.actions, EVT_LEADS);
-  b.contacts += actionValue(row.actions, EVT_CONTACTS);
+  b.contacts += actionValue(row.conversions, EVT_CONTACTS);
 }
 
 function addBucket(dst, src) {
@@ -674,6 +674,7 @@ function renderPeriodCard(label, dateStr, t, variant, callsFromGhl) {
   const convLabel = isWebinar ? "Leads" : "Scheduled Calls" + srcTag(callsFromGhl);
   const convUnit  = isWebinar ? "lead"  : "call";
   const costPerConv = safeDiv(t.spend, convCount);
+  const costPerContact = safeDiv(t.spend, t.contacts);
   const cls  = isWebinar ? "webinar" : "other";
   return `
     <div class="period ${cls}">
@@ -693,6 +694,11 @@ function renderPeriodCard(label, dateStr, t, variant, callsFromGhl) {
           <div class="metric-label">Link Clicks</div>
           <div class="metric-value">${fmtInt(t.link_clicks)}</div>
           <div class="metric-sub">${cpc === null ? '— cost / click' : fmtMoney(cpc) + ' / click'}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Contacts</div>
+          <div class="metric-value">${fmtInt(t.contacts)}</div>
+          <div class="metric-sub">${costPerContact === null ? '— cost / contact' : fmtMoney(costPerContact) + ' / contact'}</div>
         </div>
       </div>
     </div>
