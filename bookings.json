@@ -1,0 +1,55 @@
+{
+  "generated_at": "2026-10-04T02:25:07+00:00",
+  "timezone": "America/Denver",
+  "calendar_id": "jz4PWYKlNfHjOEj0p1p5",
+  "definition": "Appointments on the Book-A-Call calendar, counted on the day they were booked (dateAdded), deleted excluded.",
+  "days": {
+    "2026-10-02": {
+      "total": 27,
+      "status": {
+        "confirmed": 25,
+        "cancelled": 2
+      },
+      "source": {
+        "booking_widget": 27
+      },
+      "by_hour": {
+        "0": 3,
+        "6": 4,
+        "7": 1,
+        "9": 1,
+        "5": 5,
+        "12": 3,
+        "16": 1,
+        "21": 2,
+        "15": 1,
+        "20": 2,
+        "22": 1,
+        "17": 1,
+        "3": 1,
+        "23": 1
+      }
+    },
+    "2026-10-03": {
+      "total": 13,
+      "status": {
+        "confirmed": 13
+      },
+      "source": {
+        "booking_widget": 13
+      },
+      "by_hour": {
+        "4": 1,
+        "5": 2,
+        "10": 2,
+        "13": 1,
+        "7": 2,
+        "6": 1,
+        "8": 1,
+        "9": 1,
+        "2": 1,
+        "19": 1
+      }
+    }
+  }
+}
