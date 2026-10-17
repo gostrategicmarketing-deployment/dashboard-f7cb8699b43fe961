@@ -423,10 +423,18 @@ const EVT_CONTACTS = "contact_website";            // Website Contact standard e
 // the Book-A-Call calendar every ~5 minutes and publishes COUNTS ONLY (no contact data)
 // as bookings.json on the `data` branch; the GHL key never reaches this page. If the file
 // is missing or older than GHL_MAX_AGE_MIN, the tiles fall back to Meta's Schedule event.
+//
+// Three copies are read in parallel and the NEWEST generated_at wins. GitHub's caches can
+// hand back an old copy of a force-pushed branch (2026-10-17: a 181-min-old file while the
+// job was current), and raw.githubusercontent.com ignores the ?cb= buster, so trusting the
+// first source that answers is not safe. The commit-pinned copy asks the API for the
+// branch's current SHA and reads the file at that SHA, which no cache can make stale.
+const GHL_REPO = "gostrategicmarketing-deployment/lance-bookings-1993a7b56e5f";
 const GHL_BOOKINGS_URLS = [
-  "https://api.github.com/repos/gostrategicmarketing-deployment/lance-bookings-1993a7b56e5f/contents/bookings.json?ref=data",
-  "https://raw.githubusercontent.com/gostrategicmarketing-deployment/lance-bookings-1993a7b56e5f/data/bookings.json",
+  `https://api.github.com/repos/${GHL_REPO}/contents/bookings.json?ref=data`,
+  `https://raw.githubusercontent.com/${GHL_REPO}/data/bookings.json`,
 ];
+const GHL_DATA_SHA_URL = `https://api.github.com/repos/${GHL_REPO}/commits/data`;
 const GHL_MAX_AGE_MIN = 60;
 const GHL_STALE_MIN = 15;
 
@@ -509,25 +517,41 @@ async function gfetch(u, attempt = 0) {
   return json;
 }
 
+async function fetchGhlBookingsFrom(url, viaApi) {
+  const resp = await fetch(`${url}${url.includes("?") ? "&" : "?"}cb=${Date.now()}`, {
+    cache: "no-store",
+    headers: viaApi ? { Accept: "application/vnd.github.raw" } : {},
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  const ageMin = (Date.now() - Date.parse(data.generated_at)) / 60000;
+  if (!data.days || isNaN(ageMin)) throw new Error("unexpected file format");
+  return { ok: true, data, ageMin };
+}
+
+// bookings.json at the data branch's current commit SHA (immutable URL, so never stale).
+async function fetchGhlBookingsPinned() {
+  const resp = await fetch(`${GHL_DATA_SHA_URL}?cb=${Date.now()}`, {
+    cache: "no-store",
+    headers: { Accept: "application/vnd.github.sha" },
+  });
+  if (!resp.ok) throw new Error(`SHA lookup HTTP ${resp.status}`);
+  const sha = (await resp.text()).trim();
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("SHA lookup returned no SHA");
+  return fetchGhlBookingsFrom(`https://raw.githubusercontent.com/${GHL_REPO}/${sha}/bookings.json`, false);
+}
+
 async function fetchGhlBookings() {
-  let lastErr = "no source reachable";
-  for (const base of GHL_BOOKINGS_URLS) {
-    try {
-      const viaApi = base.includes("api.github.com");
-      const resp = await fetch(`${base}${base.includes("?") ? "&" : "?"}cb=${Date.now()}`, {
-        cache: "no-store",
-        headers: viaApi ? { Accept: "application/vnd.github.raw" } : {},
-      });
-      if (!resp.ok) { lastErr = `HTTP ${resp.status}`; continue; }
-      const data = await resp.json();
-      const ageMin = (Date.now() - Date.parse(data.generated_at)) / 60000;
-      if (!data.days || isNaN(ageMin)) { lastErr = "unexpected file format"; continue; }
-      return { ok: true, data, ageMin };
-    } catch (e) {
-      lastErr = e.message;
-    }
+  const results = await Promise.allSettled([
+    ...GHL_BOOKINGS_URLS.map(u => fetchGhlBookingsFrom(u, u.includes("api.github.com"))),
+    fetchGhlBookingsPinned(),
+  ]);
+  const good = results.filter(r => r.status === "fulfilled").map(r => r.value);
+  if (!good.length) {
+    const errs = [...new Set(results.map(r => r.reason && r.reason.message).filter(Boolean))];
+    return { ok: false, error: errs.join("; ") || "no source reachable" };
   }
-  return { ok: false, error: lastErr };
+  return good.reduce((a, b) => (b.ageMin < a.ageMin ? b : a));
 }
 
 // Today / yesterday as YYYY-MM-DD in America/Denver, the timezone of both ad accounts
