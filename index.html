@@ -419,13 +419,13 @@ const EVT_CALLS = "schedule_website";                      // Website schedules 
 const EVT_LEADS = "lead";                                  // Standard Meta Lead event (used for May Webinar registrations)
 const EVT_CONTACTS = "contact_website";            // Website Contact standard event (conversions[])
 
-// Scheduled calls come from GHL. A GitHub Actions job in this repo counts bookings on
+// Scheduled calls come from GHL. A GitHub Actions job in the public lance-bookings repo counts bookings on
 // the Book-A-Call calendar every ~5 minutes and publishes COUNTS ONLY (no contact data)
 // as bookings.json on the `data` branch; the GHL key never reaches this page. If the file
 // is missing or older than GHL_MAX_AGE_MIN, the tiles fall back to Meta's Schedule event.
 const GHL_BOOKINGS_URLS = [
-  "https://api.github.com/repos/gostrategicmarketing-deployment/dashboard-f7cb8699b43fe961/contents/bookings.json?ref=data",
-  "https://raw.githubusercontent.com/gostrategicmarketing-deployment/dashboard-f7cb8699b43fe961/data/bookings.json",
+  "https://api.github.com/repos/gostrategicmarketing-deployment/lance-bookings-1993a7b56e5f/contents/bookings.json?ref=data",
+  "https://raw.githubusercontent.com/gostrategicmarketing-deployment/lance-bookings-1993a7b56e5f/data/bookings.json",
 ];
 const GHL_MAX_AGE_MIN = 60;
 const GHL_STALE_MIN = 15;
@@ -468,7 +468,7 @@ async function fetchCampaignInsights(actId, preset) {
 // Wraps fetch so a network-layer failure reports WHY instead of the bare
 // "Failed to fetch". Distinguishes a blocked request (ad blocker / extension /
 // offline) from a Meta API rejection (expired token, permissions).
-async function gfetch(u) {
+async function gfetch(u, attempt = 0) {
   let resp;
   try {
     resp = await fetch(u);
@@ -495,6 +495,12 @@ async function gfetch(u) {
   }
   if (json.error) {
     const c = json.error.code;
+    // Meta's transient blips (code 1 unknown, code 2 "Service temporarily unavailable",
+    // or is_transient) usually clear within seconds: retry twice before reporting.
+    if ((json.error.is_transient || c === 1 || c === 2) && attempt < 2) {
+      await new Promise(r => setTimeout(r, attempt === 0 ? 1500 : 4000));
+      return gfetch(u, attempt + 1);
+    }
     const hint = (c === 190 || c === 102)
       ? " — TOKEN EXPIRED. Generate a new one in Graph API Explorer and replace FB_TOKEN in this file."
       : "";
