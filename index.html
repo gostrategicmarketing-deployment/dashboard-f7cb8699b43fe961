@@ -404,7 +404,7 @@
     <b>Everything Else</b> = all other campaigns.
     <b>Quiz Funnel</b> = any campaign whose name contains "quiz". It is its own bucket for spend and leads and never counts toward Webinar or Everything Else. Its primary result is <b>Qualified Quiz Leads</b>, the <code>QuizQualified</code> custom pixel event; Quiz Leads is the Meta <code>lead</code> event on the quiz campaign. Quiz budget is broken out on its own in the daily budget tracker.<br>
     <b>Event mapping</b>: Webinar uses Meta <code>lead</code> (webinar registrations).
-    Everything Else <b>Scheduled Calls</b> = bookings on the GoHighLevel Book-A-Call calendar, counted on the day they were booked (Mountain time, cancellations included), refreshed about every 5 minutes.
+    Everything Else <b>College Funding Calls</b> = bookings on the GoHighLevel Book-A-Call calendar (the calendar itself is unchanged; only the dashboard label was renamed 2026-11-06), counted on the day they were booked (Mountain time, cancellations included; Google, YouTube and organic-search bookings excluded), refreshed about every 5 minutes.
     If that feed is unavailable or over an hour old, it falls back to the Meta <code>Schedule</code> event ("Website schedules") and is tagged <span class="src-tag meta">Meta</span>.
     The per-account rows are always Meta schedules, because GHL cannot split a booking by ad account.
     Link Clicks = <code>inline_link_clicks</code>. Data pulled live from Meta Graph API v21.0 directly from your browser.
@@ -738,7 +738,7 @@ function renderPeriodCard(label, dateStr, t, variant, callsFromGhl) {
   if (variant === "quiz") return renderQuizCard(label, dateStr, t, cpc);
   const isWebinar = variant === "webinar";
   const convCount = isWebinar ? t.leads : t.scheduled_calls;
-  const convLabel = isWebinar ? "Leads" : "Scheduled Calls" + srcTag(callsFromGhl);
+  const convLabel = isWebinar ? "Leads" : "College Funding Calls" + srcTag(callsFromGhl);
   const convUnit  = isWebinar ? "lead"  : "call";
   const costPerConv = safeDiv(t.spend, convCount);
   const costPerContact = safeDiv(t.spend, t.contacts);
@@ -819,7 +819,7 @@ function renderColumn(label, dateStr, webinarT, otherT, quizT, combinedT, callsF
       ${renderPeriodCard(label, dateStr, quizT, "quiz")}
       <div class="combined-row">
         <span>Combined</span>
-        <span>${fmtMoney(combinedT.spend)} &middot; ${fmtInt(webinarT.leads)} leads &middot; ${fmtInt(otherT.scheduled_calls)} calls &middot; ${fmtInt(quizT.quiz_qualified)} qualified quiz &middot; ${fmtInt(combinedT.link_clicks)} clicks</span>
+        <span>${fmtMoney(combinedT.spend)} &middot; ${fmtInt(webinarT.leads)} leads &middot; ${fmtInt(otherT.scheduled_calls)} college funding calls &middot; ${fmtInt(quizT.quiz_qualified)} qualified quiz &middot; ${fmtInt(combinedT.link_clicks)} clicks</span>
       </div>
     </div>
   `;
@@ -869,7 +869,7 @@ function renderSplitTable(accounts, period, ghlCalls) {
           ${firstCell()}
           <td><span class="bucket-pill other-pill">Everything Else</span></td>
           <td>${fmtMoney(o.spend)}</td>
-          <td>${fmtInt(o.scheduled_calls)} <span class="conv-type">${fromGhl ? 'Meta schedules' : 'calls'}</span></td>
+          <td>${fmtInt(o.scheduled_calls)} <span class="conv-type">${fromGhl ? 'Meta schedules' : 'college funding calls'}</span></td>
           <td>${cpconv === null ? '—' : fmtMoney(cpconv) + (fromGhl ? ' / schedule' : ' / call')}</td>
           <td>${fmtInt(o.link_clicks)}</td>
           <td>${cpc === null ? '—' : fmtMoney(cpc)}</td>
@@ -932,7 +932,7 @@ function renderSplitTable(accounts, period, ghlCalls) {
         <tr class="subtotal other-row">
           <td colspan="2"><b>Combined — Everything Else</b></td>
           <td>${fmtMoney(tO.spend)}</td>
-          <td>${fmtInt(tO.scheduled_calls)} <span class="conv-type">calls</span>${srcTag(fromGhl)}</td>
+          <td>${fmtInt(tO.scheduled_calls)} <span class="conv-type">college funding calls</span>${srcTag(fromGhl)}</td>
           <td>${cpCallO === null ? '—' : fmtMoney(cpCallO) + ' / call'}</td>
           <td>${fmtInt(tO.link_clicks)}</td>
           <td>${cpcO === null ? '—' : fmtMoney(cpcO)}</td>
@@ -948,7 +948,7 @@ function renderSplitTable(accounts, period, ghlCalls) {
         <tr class="total">
           <td colspan="2">Grand Total</td>
           <td>${fmtMoney(tA.spend)}</td>
-          <td>${fmtInt(tW.leads)}<span class="conv-type"> leads</span> + ${fmtInt(tO.scheduled_calls)}<span class="conv-type"> calls</span> + ${fmtInt(tQ.quiz_qualified)}<span class="conv-type"> qualified quiz</span></td>
+          <td>${fmtInt(tW.leads)}<span class="conv-type"> leads</span> + ${fmtInt(tO.scheduled_calls)}<span class="conv-type"> college funding calls</span> + ${fmtInt(tQ.quiz_qualified)}<span class="conv-type"> qualified quiz</span></td>
           <td>—</td>
           <td>${fmtInt(tA.link_clicks)}</td>
           <td>${cpcA === null ? '—' : fmtMoney(cpcA)}</td>
@@ -1164,14 +1164,14 @@ function renderConversion(tToday, tY, todayFromGhl, yFromGhl) {
       <div class="conv-metric">
         <div class="lbl"><span>${label}</span><span class="day">${dateStr}</span></div>
         <div class="val">${rate === null ? "—" : rate.toFixed(2) + "%"}</div>
-        <div class="conv-sub">${fmtInt(calls)} ${calls === 1 ? "call" : "calls"}${srcTag(fromGhl)} &divide; ${fmtInt(clicks)} clicks</div>
+        <div class="conv-sub">${fmtInt(calls)} ${calls === 1 ? "college funding call" : "college funding calls"}${srcTag(fromGhl)} &divide; ${fmtInt(clicks)} clicks</div>
       </div>`;
   };
   const el = document.getElementById('conv');
   if (!el) return;
   el.innerHTML = `
     <div class="conv-card">
-      <div class="conv-head"><span class="conv-title">Scheduled-Call Conversion Rate — scheduled calls &divide; link clicks</span></div>
+      <div class="conv-head"><span class="conv-title">College Funding Call Conversion Rate — college funding calls &divide; link clicks</span></div>
       <div class="conv-grid">
         ${cell("Today", formatDate(0), tToday, todayFromGhl)}
         ${cell("Yesterday", formatDate(1), tY, yFromGhl)}
@@ -1214,8 +1214,8 @@ async function refresh() {
     if (!ghl.ok || ghl.ageMin > GHL_MAX_AGE_MIN) {
       const why = ghl.ok ? `last update ${Math.round(ghl.ageMin)} min ago` : ghl.error;
       ghlNote = "GHL bookings unavailable";
-      if (errs.length) setBanner("Some queries returned errors:\n" + errs.join("\n") + `\nGHL bookings unavailable (${why}); Scheduled Calls is showing Meta website schedules.`, 'error');
-      else setBanner(`GHL bookings unavailable (${why}). Scheduled Calls is showing Meta website schedules instead.`, 'stale');
+      if (errs.length) setBanner("Some queries returned errors:\n" + errs.join("\n") + `\nGHL bookings unavailable (${why}); College Funding Calls is showing Meta website schedules.`, 'error');
+      else setBanner(`GHL bookings unavailable (${why}). College Funding Calls is showing Meta website schedules instead.`, 'stale');
     } else {
       ghlNote = `GHL bookings as of ${fmtTime(new Date(ghl.data.generated_at))}` + (ghl.ageMin > GHL_STALE_MIN ? " (stale)" : "");
       if (errs.length) setBanner("Some queries returned errors:\n" + errs.join("\n"), 'error');
