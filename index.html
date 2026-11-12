@@ -404,7 +404,7 @@
     <b>Everything Else</b> = all other campaigns.
     <b>Quiz Funnel</b> = any campaign whose name contains "quiz". It is its own bucket for spend and leads and never counts toward Webinar or Everything Else. Its primary result is <b>Qualified Quiz Leads</b>, the <code>QuizQualified</code> custom pixel event; Quiz Leads is the Meta <code>lead</code> event on the quiz campaign. Quiz budget is broken out on its own in the daily budget tracker.<br>
     <b>Event mapping</b>: Webinar uses Meta <code>lead</code> (webinar registrations).
-    Everything Else <b>College Funding Calls</b> = bookings on the two GoHighLevel Book-A-Call calendars, "Tax Scholarships 1 on 1 mtg" and "College Funding Call" (added 2026-11-06, when the funnel started booking into it), counted on the day they were booked (Mountain time, cancellations included; Google, YouTube and organic-search bookings excluded), refreshed about every 5 minutes.
+    Everything Else <b>College Funding Calls</b> = bookings on the GoHighLevel calendars embedded in the three Book-A-Call funnel pages (College Legetty /meta, Event Legetty /meta, Real Estate CFS home), read off those pages on every refresh and matched by calendar ID so a renamed or swapped calendar still counts, counted on the day they were booked (Mountain time, cancellations included; Google, YouTube and organic-search bookings excluded), refreshed about every 5 minutes.
     If that feed is unavailable or over an hour old, it falls back to the Meta <code>Schedule</code> event ("Website schedules") and is tagged <span class="src-tag meta">Meta</span>.
     The per-account rows are always Meta schedules, because GHL cannot split a booking by ad account.
     Link Clicks = <code>inline_link_clicks</code>. Data pulled live from Meta Graph API v21.0 directly from your browser.
@@ -436,7 +436,7 @@ const EVT_CONTACTS = "contact_website";            // Website Contact standard e
 const EVT_QUIZ_QUALIFIED = "offsite_conversion.fb_pixel_custom.QuizQualified";
 
 // Scheduled calls come from GHL. A GitHub Actions job in the public lance-bookings repo counts bookings on
-// the Book-A-Call calendars (Tax Scholarships 1 on 1 mtg + College Funding Call) every ~5 minutes and publishes COUNTS ONLY (no contact data)
+// the calendars embedded in the three Book-A-Call funnel pages (read live, by id) every ~5 minutes and publishes COUNTS ONLY (no contact data)
 // as bookings.json on the `data` branch; the GHL key never reaches this page. If the file
 // is missing or older than GHL_MAX_AGE_MIN, the tiles fall back to Meta's Schedule event.
 //
