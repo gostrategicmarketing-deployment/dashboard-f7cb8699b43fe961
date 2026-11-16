@@ -102,6 +102,9 @@
   .bucket-label.quiz-label {
     background: #ccfbf1; color: #115e59; border: 1px solid #99f6e4;
   }
+  .bucket-label.leadform-label {
+    background: #ffe4e6; color: #9f1239; border: 1px solid #fecdd3;
+  }
 
   .period {
     background: white;
@@ -113,6 +116,7 @@
   .period.webinar { border-left: 3px solid #f59e0b; }
   .period.other   { border-left: 3px solid #8b5cf6; }
   .period.quiz    { border-left: 3px solid #14b8a6; }
+  .period.leadform { border-left: 3px solid #f43f5e; }
   .period h2 {
     margin: 0 0 12px;
     font-size: 11px;
@@ -154,6 +158,7 @@
   .bucket-pill.webinar-pill { background: #fef3c7; color: #92400e; }
   .bucket-pill.other-pill   { background: #ede9fe; color: #5b21b6; }
   .bucket-pill.quiz-pill    { background: #ccfbf1; color: #115e59; }
+  .bucket-pill.leadform-pill { background: #ffe4e6; color: #9f1239; }
 
   .conv-type {
     font-size: 10.5px;
@@ -167,6 +172,7 @@
   tbody tr.subtotal.webinar-row td:first-child { color: #92400e; }
   tbody tr.subtotal.other-row td:first-child   { color: #5b21b6; }
   tbody tr.subtotal.quiz-row td:first-child    { color: #115e59; }
+  tbody tr.subtotal.leadform-row td:first-child { color: #9f1239; }
 
   .metrics {
     display: grid;
@@ -312,6 +318,13 @@
   @media (max-width: 1000px) { .budget-split.four { grid-template-columns: 1fr 1fr; } }
   @media (max-width: 600px) { .budget-split.four { grid-template-columns: 1fr; } }
   .bgt-table tr.bkt-quiz td.bkt { color: #5eead4; }
+  .bgt-stat-lbl .tag.leadform { background: rgba(251,113,133,0.18); color: #fda4af; }
+  .bgt-stat.leadform .budget-value { color: #fda4af; }
+  .bgt-table tr.bkt-leadform td.bkt { color: #fda4af; }
+  .budget-split.five { grid-template-columns: repeat(5, 1fr); }
+  @media (max-width: 1100px) { .budget-split.five { grid-template-columns: 1fr 1fr 1fr; } }
+  @media (max-width: 700px) { .budget-split.five { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 480px) { .budget-split.five { grid-template-columns: 1fr; } }
   .budget-split.three { grid-template-columns: 1fr 1fr 1fr; }
   @media (max-width: 800px) { .budget-split.three { grid-template-columns: 1fr; } }
   .budget-total-line { margin-top: 12px; font-size: 13px; color: #cbd5e1; }
@@ -403,6 +416,7 @@
     Same rule drives the spend split, the conversion tile, and the budget tracker.
     <b>Everything Else</b> = all other campaigns.
     <b>Quiz Funnel</b> = any campaign whose name contains "quiz". It is its own bucket for spend and leads and never counts toward Webinar or Everything Else. Its primary result is <b>Qualified Quiz Leads</b>, the <code>QuizQualified</code> custom pixel event; Quiz Leads is the Meta <code>lead</code> event on the quiz campaign. Quiz budget is broken out on its own in the daily budget tracker.<br>
+    <b>4 Questions Lead Form</b> = the campaign <code>TOF | 4 Questions Lead Form</code> (Main, ID 52583581834983). Its own bucket for spend, leads and budget, never counted in Webinar, Quiz or Everything Else. Its primary result is <b>Lead Form Leads</b>, Meta instant-form submissions (<code>onsite_conversion.lead_grouped</code>). College Funding Calls stay a total GHL count, so any calls these leads book still show under Everything Else.<br>
     <b>Event mapping</b>: Webinar uses Meta <code>lead</code> (webinar registrations).
     Everything Else <b>College Funding Calls</b> = bookings on the GoHighLevel calendars embedded in the three Book-A-Call funnel pages (College Legetty /meta, Event Legetty /meta, Real Estate CFS home), read off those pages on every refresh and matched by calendar ID so a renamed or swapped calendar still counts, counted on the day they were booked (Mountain time, cancellations included; Google, YouTube and organic-search bookings excluded), refreshed about every 5 minutes.
     If that feed is unavailable or over an hour old, it falls back to the Meta <code>Schedule</code> event ("Website schedules") and is tagged <span class="src-tag meta">Meta</span>.
@@ -434,6 +448,8 @@ const EVT_CONTACTS = "contact_website";            // Website Contact standard e
 // Qualified quiz lead = custom pixel event QuizQualified (the Quiz Qualified campaign's
 // optimization event). Meta reports it in conversions[]; actions[] checked as a fallback.
 const EVT_QUIZ_QUALIFIED = "offsite_conversion.fb_pixel_custom.QuizQualified";
+// Instant-form leads (Meta lead form submissions) = onsite_conversion.lead_grouped in actions[].
+const EVT_FORM_LEADS = "onsite_conversion.lead_grouped";
 
 // Scheduled calls come from GHL. A GitHub Actions job in the public lance-bookings repo counts bookings on
 // the calendars embedded in the three Book-A-Call funnel pages (read live, by id) every ~5 minutes and publishes COUNTS ONLY (no contact data)
@@ -477,6 +493,20 @@ const QUIZ_IDS = new Set(["120249829659050587"]); // TOF | Quiz Qualified | ABO 
 function isQuizCampaign(name, id) {
   if (id && QUIZ_IDS.has(String(id))) return true;
   if (name && QUIZ_NAME_RE.test(name)) return true;
+  return false;
+}
+
+// 4 Questions Lead Form is its own bucket (Phil 2026-11-16): a Meta instant-form
+// campaign in the Main account (started 2026-11-16, $200/day CBO). Its own tile,
+// split-table rows and budget line; never counts toward Webinar, Quiz or Everything
+// Else. Matched by its ID, plus the exact name in case it is duplicated. The older
+// "Webinar Lead Form" campaigns stay webinar. Checked FIRST, before quiz and webinar.
+const LEADFORM_NAME_RE = /4 questions lead form/i;
+const LEADFORM_IDS = new Set(["52583581834983"]); // TOF | 4 Questions Lead Form (Main)
+
+function isLeadFormCampaign(name, id) {
+  if (id && LEADFORM_IDS.has(String(id))) return true;
+  if (name && LEADFORM_NAME_RE.test(name)) return true;
   return false;
 }
 
@@ -609,7 +639,7 @@ function actionValue(actions, type) {
 }
 
 function emptyBucket() {
-  return { spend: 0, link_clicks: 0, impressions: 0, scheduled_calls: 0, leads: 0, contacts: 0, quiz_qualified: 0 };
+  return { spend: 0, link_clicks: 0, impressions: 0, scheduled_calls: 0, leads: 0, contacts: 0, quiz_qualified: 0, form_leads: 0 };
 }
 
 function addRowToBucket(b, row) {
@@ -620,6 +650,7 @@ function addRowToBucket(b, row) {
   b.leads += actionValue(row.actions, EVT_LEADS);
   b.contacts += actionValue(row.conversions, EVT_CONTACTS);
   b.quiz_qualified += actionValue(row.conversions, EVT_QUIZ_QUALIFIED) || actionValue(row.actions, EVT_QUIZ_QUALIFIED);
+  b.form_leads += actionValue(row.actions, EVT_FORM_LEADS);
 }
 
 function addBucket(dst, src) {
@@ -630,18 +661,21 @@ function addBucket(dst, src) {
   dst.leads += src.leads;
   dst.contacts += src.contacts;
   dst.quiz_qualified += src.quiz_qualified;
+  dst.form_leads += src.form_leads;
 }
 
 function bucketsFromRows(rows) {
   const webinar = emptyBucket();
   const other = emptyBucket();
   const quiz = emptyBucket();
+  const leadform = emptyBucket();
   for (const r of (rows || [])) {
-    if (isQuizCampaign(r.campaign_name, r.campaign_id)) addRowToBucket(quiz, r);
+    if (isLeadFormCampaign(r.campaign_name, r.campaign_id)) addRowToBucket(leadform, r);
+    else if (isQuizCampaign(r.campaign_name, r.campaign_id)) addRowToBucket(quiz, r);
     else if (isWebinarCampaign(r.campaign_name, r.campaign_id)) addRowToBucket(webinar, r);
     else addRowToBucket(other, r);
   }
-  return { webinar, other, quiz };
+  return { webinar, other, quiz, leadform };
 }
 
 async function fetchAll() {
@@ -698,6 +732,7 @@ function combineNonWebinarConversion(accounts, period) {
     for (const r of p.rows) {
       if (CONV_EXCLUDE_RE.test(r.campaign_name || "")) continue;
       if (isQuizCampaign(r.campaign_name, r.campaign_id)) continue;
+      if (isLeadFormCampaign(r.campaign_name, r.campaign_id)) continue;
       addRowToBucket(t, r);
     }
   }
@@ -705,7 +740,7 @@ function combineNonWebinarConversion(accounts, period) {
 }
 
 function combinePeriodBucket(accounts, period, bucket) {
-  // bucket = "webinar" | "other" | "quiz" | "all"
+  // bucket = "webinar" | "other" | "quiz" | "leadform" | "all"
   const t = emptyBucket();
   for (const a of accounts) {
     const p = a[period] || {};
@@ -713,10 +748,12 @@ function combinePeriodBucket(accounts, period, bucket) {
     if (bucket === "webinar")     addBucket(t, p.webinar || emptyBucket());
     else if (bucket === "other")  addBucket(t, p.other   || emptyBucket());
     else if (bucket === "quiz")   addBucket(t, p.quiz    || emptyBucket());
+    else if (bucket === "leadform") addBucket(t, p.leadform || emptyBucket());
     else { // all
       addBucket(t, p.webinar || emptyBucket());
       addBucket(t, p.other   || emptyBucket());
       addBucket(t, p.quiz    || emptyBucket());
+      addBucket(t, p.leadform || emptyBucket());
     }
   }
   return t;
@@ -736,6 +773,7 @@ function renderPeriodCard(label, dateStr, t, variant, callsFromGhl) {
   // variant = "other"   → primary metric is Scheduled Calls
   const cpc = safeDiv(t.spend, t.link_clicks);
   if (variant === "quiz") return renderQuizCard(label, dateStr, t, cpc);
+  if (variant === "leadform") return renderLeadFormCard(label, dateStr, t, cpc);
   const isWebinar = variant === "webinar";
   const convCount = isWebinar ? t.leads : t.scheduled_calls;
   const convLabel = isWebinar ? "Leads" : "College Funding Calls" + srcTag(callsFromGhl);
@@ -804,7 +842,39 @@ function renderQuizCard(label, dateStr, t, cpc) {
   `;
 }
 
-function renderColumn(label, dateStr, webinarT, otherT, quizT, combinedT, callsFromGhl) {
+function renderLeadFormCard(label, dateStr, t, cpc) {
+  const cpl = safeDiv(t.spend, t.form_leads);
+  const cps = safeDiv(t.spend, t.scheduled_calls);
+  return `
+    <div class="period leadform">
+      <h2>${label}<span class="date">${dateStr}</span></h2>
+      <div class="metrics">
+        <div class="metric spend">
+          <div class="metric-label">Amount Spent</div>
+          <div class="metric-value">${fmtMoney(t.spend)}</div>
+          <div class="metric-sub">${fmtInt(t.impressions)} impressions</div>
+        </div>
+        <div class="metric primary">
+          <div class="metric-label">Lead Form Leads</div>
+          <div class="metric-value">${fmtInt(t.form_leads)}</div>
+          <div class="metric-sub">${cpl === null ? '— cost / lead' : fmtMoney(cpl) + ' / lead'}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Link Clicks</div>
+          <div class="metric-value">${fmtInt(t.link_clicks)}</div>
+          <div class="metric-sub">${cpc === null ? '— cost / click' : fmtMoney(cpc) + ' / click'}</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Schedules<span class="src-tag meta">Meta</span></div>
+          <div class="metric-value">${fmtInt(t.scheduled_calls)}</div>
+          <div class="metric-sub">${cps === null ? '— cost / schedule' : fmtMoney(cps) + ' / schedule'}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderColumn(label, dateStr, webinarT, otherT, quizT, leadT, combinedT, callsFromGhl) {
   return `
     <div class="period-col">
       <div class="col-header">
@@ -817,9 +887,11 @@ function renderColumn(label, dateStr, webinarT, otherT, quizT, combinedT, callsF
       ${renderPeriodCard(label, dateStr, otherT, "other", callsFromGhl)}
       <div class="bucket-label quiz-label">Quiz Funnel</div>
       ${renderPeriodCard(label, dateStr, quizT, "quiz")}
+      <div class="bucket-label leadform-label">4 Questions Lead Form</div>
+      ${renderPeriodCard(label, dateStr, leadT, "leadform")}
       <div class="combined-row">
         <span>Combined</span>
-        <span>${fmtMoney(combinedT.spend)} &middot; ${fmtInt(webinarT.leads)} leads &middot; ${fmtInt(otherT.scheduled_calls)} college funding calls &middot; ${fmtInt(quizT.quiz_qualified)} qualified quiz &middot; ${fmtInt(combinedT.link_clicks)} clicks</span>
+        <span>${fmtMoney(combinedT.spend)} &middot; ${fmtInt(webinarT.leads)} leads &middot; ${fmtInt(otherT.scheduled_calls)} college funding calls &middot; ${fmtInt(quizT.quiz_qualified)} qualified quiz &middot; ${fmtInt(leadT.form_leads)} lead form leads &middot; ${fmtInt(combinedT.link_clicks)} clicks</span>
       </div>
     </div>
   `;
@@ -838,10 +910,12 @@ function renderSplitTable(accounts, period, ghlCalls) {
     const w = p.webinar || emptyBucket();
     const o = p.other   || emptyBucket();
     const q = p.quiz    || emptyBucket();
+    const l = p.leadform || emptyBucket();
+    const lHasData = l.spend || l.impressions || l.link_clicks || l.form_leads;
     const wHasData = w.spend || w.impressions || w.link_clicks || w.scheduled_calls;
     const qHasData = q.spend || q.impressions || q.link_clicks || q.quiz_qualified || q.leads;
-    const oHasData = o.spend || o.impressions || o.link_clicks || o.scheduled_calls || (!wHasData && !qHasData);
-    const span = (wHasData ? 1 : 0) + (oHasData ? 1 : 0) + (qHasData ? 1 : 0);
+    const oHasData = o.spend || o.impressions || o.link_clicks || o.scheduled_calls || (!wHasData && !qHasData && !lHasData);
+    const span = (wHasData ? 1 : 0) + (oHasData ? 1 : 0) + (qHasData ? 1 : 0) + (lHasData ? 1 : 0);
     const acctTd = `<td rowspan="${span}"><div class="acct-name">${a.label}</div><div class="acct-id">${a.id}</div></td>`;
     let acctUsed = false;
     const firstCell = () => { if (acctUsed) return ''; acctUsed = true; return acctTd; };
@@ -891,13 +965,31 @@ function renderSplitTable(accounts, period, ghlCalls) {
         </tr>
       `);
     }
+    if (lHasData) {
+      const cpc  = safeDiv(l.spend, l.link_clicks);
+      const cpl  = safeDiv(l.spend, l.form_leads);
+      rows.push(`
+        <tr>
+          ${firstCell()}
+          <td><span class="bucket-pill leadform-pill">4 Questions Lead Form</span></td>
+          <td>${fmtMoney(l.spend)}</td>
+          <td>${fmtInt(l.form_leads)} <span class="conv-type">form leads</span></td>
+          <td>${cpl === null ? '—' : fmtMoney(cpl) + ' / lead'}</td>
+          <td>${fmtInt(l.link_clicks)}</td>
+          <td>${cpc === null ? '—' : fmtMoney(cpc)}</td>
+        </tr>
+      `);
+    }
   }
 
   const tW = combinePeriodBucket(accounts, period, "webinar");
   const tO = combinePeriodBucket(accounts, period, "other");
   if (fromGhl) tO.scheduled_calls = ghlCalls;
   const tQ = combinePeriodBucket(accounts, period, "quiz");
+  const tL = combinePeriodBucket(accounts, period, "leadform");
   const tA = combinePeriodBucket(accounts, period, "all");
+  const cpcL    = safeDiv(tL.spend, tL.link_clicks);
+  const cpLeadL = safeDiv(tL.spend, tL.form_leads);
   const cpcQ    = safeDiv(tQ.spend, tQ.link_clicks);
   const cpQualQ = safeDiv(tQ.spend, tQ.quiz_qualified);
   const cpcW    = safeDiv(tW.spend, tW.link_clicks);
@@ -945,10 +1037,18 @@ function renderSplitTable(accounts, period, ghlCalls) {
           <td>${fmtInt(tQ.link_clicks)}</td>
           <td>${cpcQ === null ? '—' : fmtMoney(cpcQ)}</td>
         </tr>
+        <tr class="subtotal leadform-row">
+          <td colspan="2"><b>Combined — 4 Questions Lead Form</b></td>
+          <td>${fmtMoney(tL.spend)}</td>
+          <td>${fmtInt(tL.form_leads)} <span class="conv-type">form leads</span></td>
+          <td>${cpLeadL === null ? '—' : fmtMoney(cpLeadL) + ' / lead'}</td>
+          <td>${fmtInt(tL.link_clicks)}</td>
+          <td>${cpcL === null ? '—' : fmtMoney(cpcL)}</td>
+        </tr>
         <tr class="total">
           <td colspan="2">Grand Total</td>
           <td>${fmtMoney(tA.spend)}</td>
-          <td>${fmtInt(tW.leads)}<span class="conv-type"> leads</span> + ${fmtInt(tO.scheduled_calls)}<span class="conv-type"> college funding calls</span> + ${fmtInt(tQ.quiz_qualified)}<span class="conv-type"> qualified quiz</span></td>
+          <td>${fmtInt(tW.leads)}<span class="conv-type"> leads</span> + ${fmtInt(tO.scheduled_calls)}<span class="conv-type"> college funding calls</span> + ${fmtInt(tQ.quiz_qualified)}<span class="conv-type"> qualified quiz</span> + ${fmtInt(tL.form_leads)}<span class="conv-type"> lead form leads</span></td>
           <td>—</td>
           <td>${fmtInt(tA.link_clicks)}</td>
           <td>${cpcA === null ? '—' : fmtMoney(cpcA)}</td>
@@ -964,10 +1064,12 @@ function render(accounts, ghl) {
   const tWToday = combinePeriodBucket(accounts, "today", "webinar");
   const tOToday = combinePeriodBucket(accounts, "today", "other");
   const tQToday = combinePeriodBucket(accounts, "today", "quiz");
+  const tLToday = combinePeriodBucket(accounts, "today", "leadform");
   const tAToday = combinePeriodBucket(accounts, "today", "all");
   const tWY = combinePeriodBucket(accounts, "yesterday", "webinar");
   const tOY = combinePeriodBucket(accounts, "yesterday", "other");
   const tQY = combinePeriodBucket(accounts, "yesterday", "quiz");
+  const tLY = combinePeriodBucket(accounts, "yesterday", "leadform");
   const tAY = combinePeriodBucket(accounts, "yesterday", "all");
 
   // Scheduled-call conversion rate (Meta): scheduled calls ÷ link clicks.
@@ -980,8 +1082,8 @@ function render(accounts, ghl) {
 
   document.getElementById('content').innerHTML = `
     <div class="columns">
-      ${renderColumn("Today",     formatDate(0), tWToday, tOToday, tQToday, tAToday, callsToday !== null)}
-      ${renderColumn("Yesterday", formatDate(1), tWY,     tOY,     tQY,     tAY,     callsY !== null)}
+      ${renderColumn("Today",     formatDate(0), tWToday, tOToday, tQToday, tLToday, tAToday, callsToday !== null)}
+      ${renderColumn("Yesterday", formatDate(1), tWY,     tOY,     tQY,     tLY,     tAY,     callsY !== null)}
     </div>
     <div class="section-title">Today — per account, split by bucket</div>
     ${renderSplitTable(accounts, "today", callsToday)}
@@ -1045,7 +1147,7 @@ async function fetchAccountBudget(actId) {
   // Only one of campaign (CBO) or ad set (ABO) carries a daily_budget, so
   // there is no double-counting.
   const now = Date.now();
-  let runToday = 0, scheduled = 0, webinar = 0, quiz = 0;
+  let runToday = 0, scheduled = 0, webinar = 0, quiz = 0, leadform = 0;
   const items = [];
   const classify = (rows, level) => {
     for (const r of rows) {
@@ -1056,7 +1158,8 @@ async function fetchAccountBudget(actId) {
       const started = r.start_time ? new Date(r.start_time).getTime() : 0;
       let bucket;
       // Quiz Funnel budget is its own bucket; it never counts toward the decision number.
-      if (isQuizCampaign(cName, cId) || isQuizCampaign(r.name)) { quiz += b; bucket = "quiz"; }
+      if (isLeadFormCampaign(cName, cId)) { leadform += b; bucket = "leadform"; }
+      else if (isQuizCampaign(cName, cId) || isQuizCampaign(r.name)) { quiz += b; bucket = "quiz"; }
       else if (isWebinarBudgetRow(r.name, cId, cName)) { webinar += b; bucket = "webinar"; }
       else if (started > now) { scheduled += b; bucket = "scheduled"; }
       else { runToday += b; bucket = "today"; }
@@ -1066,7 +1169,7 @@ async function fetchAccountBudget(actId) {
   classify(camps, "campaign");
   classify(adsets, "adset");
   items.sort((a, b) => b.budget - a.budget);
-  return { runToday, scheduled, webinar, quiz, total: runToday + scheduled + webinar + quiz, items };
+  return { runToday, scheduled, webinar, quiz, leadform, total: runToday + scheduled + webinar + quiz + leadform, items };
 }
 
 async function fetchAllBudgets() {
@@ -1082,18 +1185,20 @@ function renderBudget(perAccount) {
   const webGrand = perAccount.reduce((s, b) => s + (b.error ? 0 : (b.webinar || 0)), 0);
   const schedGrand = perAccount.reduce((s, b) => s + (b.error ? 0 : b.scheduled), 0);
   const quizGrand = perAccount.reduce((s, b) => s + (b.error ? 0 : (b.quiz || 0)), 0);
-  const allGrand = runGrand + webGrand + schedGrand + quizGrand;
+  const lfGrand = perAccount.reduce((s, b) => s + (b.error ? 0 : (b.leadform || 0)), 0);
+  const allGrand = runGrand + webGrand + schedGrand + quizGrand + lfGrand;
 
   const parts = perAccount.map(a => {
     if (a.error) return `<span class="bgt-acct"><b>${a.label}</b>: <span class="err">${a.error}</span></span>`;
     const bits = [`${fmtMoney(a.runToday)}/day`];
     if (a.webinar > 0) bits.push(`<span style="color:#93c5fd">+${fmtMoney(a.webinar)} webinar</span>`);
     if (a.quiz > 0) bits.push(`<span style="color:#5eead4">+${fmtMoney(a.quiz)} quiz</span>`);
+    if (a.leadform > 0) bits.push(`<span style="color:#fda4af">+${fmtMoney(a.leadform)} 4Q lead form</span>`);
     if (a.scheduled > 0) bits.push(`<span style="color:#fcd34d">+${fmtMoney(a.scheduled)} scheduled</span>`);
     return `<span class="bgt-acct"><b>${a.label}</b>: ${bits.join(' ')}</span>`;
   }).join('');
 
-  const bucketLabel = { today: 'Running today', webinar: 'Webinar', quiz: 'Quiz Funnel', scheduled: 'Scheduled' };
+  const bucketLabel = { today: 'Running today', webinar: 'Webinar', quiz: 'Quiz Funnel', leadform: '4Q Lead Form', scheduled: 'Scheduled' };
   let lineCount = 0;
   const rowsHtml = perAccount.map(a => {
     if (a.error || !a.items || !a.items.length) return '';
@@ -1105,6 +1210,7 @@ function renderBudget(perAccount) {
     return `<tr class="bgt-acct-hd"><td colspan="4">${a.label} — ${fmtMoney(a.runToday)} today`
       + `${a.webinar > 0 ? ' / ' + fmtMoney(a.webinar) + ' webinar' : ''}`
       + `${a.quiz > 0 ? ' / ' + fmtMoney(a.quiz) + ' quiz' : ''}`
+      + `${a.leadform > 0 ? ' / ' + fmtMoney(a.leadform) + ' 4Q lead form' : ''}`
       + `${a.scheduled > 0 ? ' / ' + fmtMoney(a.scheduled) + ' scheduled' : ''}</td></tr>` + lis;
   }).join('');
 
@@ -1118,11 +1224,11 @@ function renderBudget(perAccount) {
   document.getElementById('budget').innerHTML = `
     <div class="budget-card">
       <div class="budget-label">Total Daily Budget</div>
-      <div class="budget-split four">
+      <div class="budget-split five">
         <div class="bgt-stat">
-          <div class="bgt-stat-lbl"><span class="tag today">Running today, excl. webinar &amp; quiz</span></div>
+          <div class="bgt-stat-lbl"><span class="tag today">Running today, excl. webinar, quiz &amp; lead form</span></div>
           <div class="budget-value">${fmtMoney(runGrand)}<span class="budget-per">/ day</span></div>
-          <div class="budget-note">The decision number: active ad sets &amp; campaigns delivering today across both accounts, webinar and quiz removed. Excludes lifetime-budget ad sets.</div>
+          <div class="budget-note">The decision number: active ad sets &amp; campaigns delivering today across both accounts, webinar, quiz and the 4 Questions Lead Form removed. Excludes lifetime-budget ad sets.</div>
         </div>
         <div class="bgt-stat webinar">
           <div class="bgt-stat-lbl"><span class="tag web">Webinar</span></div>
@@ -1134,6 +1240,11 @@ function renderBudget(perAccount) {
           <div class="budget-value">${fmtMoney(quizGrand)}<span class="budget-per">/ day</span></div>
           <div class="budget-note">${quizGrand > 0 ? 'Active quiz campaign budget, tracked on its own.' : 'No active quiz budget right now.'}</div>
         </div>
+        <div class="bgt-stat leadform">
+          <div class="bgt-stat-lbl"><span class="tag leadform">4 Questions Lead Form</span></div>
+          <div class="budget-value">${fmtMoney(lfGrand)}<span class="budget-per">/ day</span></div>
+          <div class="budget-note">${lfGrand > 0 ? 'Active lead form campaign budget, tracked on its own.' : 'No active lead form budget right now.'}</div>
+        </div>
         <div class="bgt-stat future">
           <div class="bgt-stat-lbl"><span class="tag combo">Scheduled (future start)</span></div>
           <div class="budget-value">${fmtMoney(schedGrand)}<span class="budget-per">/ day</span></div>
@@ -1141,7 +1252,7 @@ function renderBudget(perAccount) {
         </div>
       </div>
       <div class="budget-breakdown">${parts}</div>
-      <div class="budget-total-line">All active budget (today + webinar + quiz + scheduled): <b>${fmtMoney(allGrand)}/day</b></div>
+      <div class="budget-total-line">All active budget (today + webinar + quiz + lead form + scheduled): <b>${fmtMoney(allGrand)}/day</b></div>
       <details class="budget-details">
         <summary>Show every ad set &amp; campaign (${lineCount} line items)</summary>
         <table class="bgt-table">
