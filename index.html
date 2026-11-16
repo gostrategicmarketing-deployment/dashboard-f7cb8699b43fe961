@@ -396,7 +396,7 @@
   <div class="topbar">
     <div class="title-block">
       <h1>Lance Morgan — Meta Ads Dashboard</h1>
-      <div class="sub">2 accounts combined, split by <b>Webinar</b> vs <b>Everything Else</b>. <b>Today</b> &amp; <b>Yesterday</b>. <span id="updated"></span></div>
+      <div class="sub">2 accounts combined, split by <b>Everything Else</b> vs <b>4 Questions Lead Form</b> (webinar and quiz campaigns left out). <b>Today</b> &amp; <b>Yesterday</b>. <span id="updated"></span></div>
     </div>
     <button id="refresh" class="refresh-btn">
       <span class="dot"></span>
@@ -412,6 +412,7 @@
   </div>
 
   <div class="footnote">
+    <b>Webinar and Quiz Funnel are no longer shown</b> (Phil 2026-11-16): their campaigns are still kept out of Everything Else, the conversion rate and the decision budget, but get no tile, table line or budget card.<br>
     <b>Webinar bucket</b>: any campaign OR ad set whose name contains "webinar", anywhere in the name, across both accounts.
     Same rule drives the spend split, the conversion tile, and the budget tracker.
     <b>Everything Else</b> = all other campaigns.
@@ -881,17 +882,15 @@ function renderColumn(label, dateStr, webinarT, otherT, quizT, leadT, combinedT,
         <span class="col-label">${label}</span>
         <span class="col-date">${dateStr}</span>
       </div>
-      <div class="bucket-label webinar-label">Webinar</div>
-      ${renderPeriodCard(label, dateStr, webinarT, "webinar")}
+      <!-- Webinar and Quiz Funnel tiles removed (Phil 2026-11-16); their spend is still
+           bucketed separately and stays out of Everything Else. -->
       <div class="bucket-label other-label">Everything Else</div>
       ${renderPeriodCard(label, dateStr, otherT, "other", callsFromGhl)}
-      <div class="bucket-label quiz-label">Quiz Funnel</div>
-      ${renderPeriodCard(label, dateStr, quizT, "quiz")}
       <div class="bucket-label leadform-label">4 Questions Lead Form</div>
       ${renderPeriodCard(label, dateStr, leadT, "leadform")}
       <div class="combined-row">
         <span>Combined</span>
-        <span>${fmtMoney(combinedT.spend)} &middot; ${fmtInt(webinarT.leads)} leads &middot; ${fmtInt(otherT.scheduled_calls)} college funding calls &middot; ${fmtInt(quizT.quiz_qualified)} qualified quiz &middot; ${fmtInt(leadT.form_leads)} lead form leads &middot; ${fmtInt(combinedT.link_clicks)} clicks</span>
+        <span>${fmtMoney(otherT.spend + leadT.spend)} &middot; ${fmtInt(otherT.scheduled_calls)} college funding calls &middot; ${fmtInt(leadT.form_leads)} lead form leads &middot; ${fmtInt(otherT.link_clicks + leadT.link_clicks)} clicks</span>
       </div>
     </div>
   `;
@@ -912,8 +911,9 @@ function renderSplitTable(accounts, period, ghlCalls) {
     const q = p.quiz    || emptyBucket();
     const l = p.leadform || emptyBucket();
     const lHasData = l.spend || l.impressions || l.link_clicks || l.form_leads;
-    const wHasData = w.spend || w.impressions || w.link_clicks || w.scheduled_calls;
-    const qHasData = q.spend || q.impressions || q.link_clicks || q.quiz_qualified || q.leads;
+    // Webinar and Quiz rows removed (Phil 2026-11-16); their spend stays out of Everything Else.
+    const wHasData = false;
+    const qHasData = false;
     const oHasData = o.spend || o.impressions || o.link_clicks || o.scheduled_calls || (!wHasData && !qHasData && !lHasData);
     const span = (wHasData ? 1 : 0) + (oHasData ? 1 : 0) + (qHasData ? 1 : 0) + (lHasData ? 1 : 0);
     const acctTd = `<td rowspan="${span}"><div class="acct-name">${a.label}</div><div class="acct-id">${a.id}</div></td>`;
@@ -987,7 +987,8 @@ function renderSplitTable(accounts, period, ghlCalls) {
   if (fromGhl) tO.scheduled_calls = ghlCalls;
   const tQ = combinePeriodBucket(accounts, period, "quiz");
   const tL = combinePeriodBucket(accounts, period, "leadform");
-  const tA = combinePeriodBucket(accounts, period, "all");
+  const tA = combinePeriodBucket(accounts, period, "other");
+  addBucket(tA, tL);
   const cpcL    = safeDiv(tL.spend, tL.link_clicks);
   const cpLeadL = safeDiv(tL.spend, tL.form_leads);
   const cpcQ    = safeDiv(tQ.spend, tQ.link_clicks);
@@ -1013,14 +1014,6 @@ function renderSplitTable(accounts, period, ghlCalls) {
       </thead>
       <tbody>
         ${rows.join('')}
-        <tr class="subtotal webinar-row">
-          <td colspan="2"><b>Combined — Webinar</b></td>
-          <td>${fmtMoney(tW.spend)}</td>
-          <td>${fmtInt(tW.leads)} <span class="conv-type">leads</span></td>
-          <td>${cpLeadW === null ? '—' : fmtMoney(cpLeadW) + ' / lead'}</td>
-          <td>${fmtInt(tW.link_clicks)}</td>
-          <td>${cpcW === null ? '—' : fmtMoney(cpcW)}</td>
-        </tr>
         <tr class="subtotal other-row">
           <td colspan="2"><b>Combined — Everything Else</b></td>
           <td>${fmtMoney(tO.spend)}</td>
@@ -1028,14 +1021,6 @@ function renderSplitTable(accounts, period, ghlCalls) {
           <td>${cpCallO === null ? '—' : fmtMoney(cpCallO) + ' / call'}</td>
           <td>${fmtInt(tO.link_clicks)}</td>
           <td>${cpcO === null ? '—' : fmtMoney(cpcO)}</td>
-        </tr>
-        <tr class="subtotal quiz-row">
-          <td colspan="2"><b>Combined — Quiz Funnel</b></td>
-          <td>${fmtMoney(tQ.spend)}</td>
-          <td>${fmtInt(tQ.quiz_qualified)} <span class="conv-type">qualified</span> <span class="conv-type">(${fmtInt(tQ.leads)} leads)</span></td>
-          <td>${cpQualQ === null ? '—' : fmtMoney(cpQualQ) + ' / qualified'}</td>
-          <td>${fmtInt(tQ.link_clicks)}</td>
-          <td>${cpcQ === null ? '—' : fmtMoney(cpcQ)}</td>
         </tr>
         <tr class="subtotal leadform-row">
           <td colspan="2"><b>Combined — 4 Questions Lead Form</b></td>
@@ -1048,7 +1033,7 @@ function renderSplitTable(accounts, period, ghlCalls) {
         <tr class="total">
           <td colspan="2">Grand Total</td>
           <td>${fmtMoney(tA.spend)}</td>
-          <td>${fmtInt(tW.leads)}<span class="conv-type"> leads</span> + ${fmtInt(tO.scheduled_calls)}<span class="conv-type"> college funding calls</span> + ${fmtInt(tQ.quiz_qualified)}<span class="conv-type"> qualified quiz</span> + ${fmtInt(tL.form_leads)}<span class="conv-type"> lead form leads</span></td>
+          <td>${fmtInt(tO.scheduled_calls)}<span class="conv-type"> college funding calls</span> + ${fmtInt(tL.form_leads)}<span class="conv-type"> lead form leads</span></td>
           <td>—</td>
           <td>${fmtInt(tA.link_clicks)}</td>
           <td>${cpcA === null ? '—' : fmtMoney(cpcA)}</td>
@@ -1191,8 +1176,6 @@ function renderBudget(perAccount) {
   const parts = perAccount.map(a => {
     if (a.error) return `<span class="bgt-acct"><b>${a.label}</b>: <span class="err">${a.error}</span></span>`;
     const bits = [`${fmtMoney(a.runToday)}/day`];
-    if (a.webinar > 0) bits.push(`<span style="color:#93c5fd">+${fmtMoney(a.webinar)} webinar</span>`);
-    if (a.quiz > 0) bits.push(`<span style="color:#5eead4">+${fmtMoney(a.quiz)} quiz</span>`);
     if (a.leadform > 0) bits.push(`<span style="color:#fda4af">+${fmtMoney(a.leadform)} 4Q lead form</span>`);
     if (a.scheduled > 0) bits.push(`<span style="color:#fcd34d">+${fmtMoney(a.scheduled)} scheduled</span>`);
     return `<span class="bgt-acct"><b>${a.label}</b>: ${bits.join(' ')}</span>`;
@@ -1224,21 +1207,11 @@ function renderBudget(perAccount) {
   document.getElementById('budget').innerHTML = `
     <div class="budget-card">
       <div class="budget-label">Total Daily Budget</div>
-      <div class="budget-split five">
+      <div class="budget-split three">
         <div class="bgt-stat">
           <div class="bgt-stat-lbl"><span class="tag today">Running today, excl. webinar, quiz &amp; lead form</span></div>
           <div class="budget-value">${fmtMoney(runGrand)}<span class="budget-per">/ day</span></div>
           <div class="budget-note">The decision number: active ad sets &amp; campaigns delivering today across both accounts, webinar, quiz and the 4 Questions Lead Form removed. Excludes lifetime-budget ad sets.</div>
-        </div>
-        <div class="bgt-stat webinar">
-          <div class="bgt-stat-lbl"><span class="tag web">Webinar</span></div>
-          <div class="budget-value">${fmtMoney(webGrand)}<span class="budget-per">/ day</span></div>
-          <div class="budget-note">${webNote}</div>
-        </div>
-        <div class="bgt-stat quiz">
-          <div class="bgt-stat-lbl"><span class="tag quiz">Quiz Funnel</span></div>
-          <div class="budget-value">${fmtMoney(quizGrand)}<span class="budget-per">/ day</span></div>
-          <div class="budget-note">${quizGrand > 0 ? 'Active quiz campaign budget, tracked on its own.' : 'No active quiz budget right now.'}</div>
         </div>
         <div class="bgt-stat leadform">
           <div class="bgt-stat-lbl"><span class="tag leadform">4 Questions Lead Form</span></div>
@@ -1252,7 +1225,7 @@ function renderBudget(perAccount) {
         </div>
       </div>
       <div class="budget-breakdown">${parts}</div>
-      <div class="budget-total-line">All active budget (today + webinar + quiz + lead form + scheduled): <b>${fmtMoney(allGrand)}/day</b></div>
+      <div class="budget-total-line">All active budget (today + lead form + scheduled): <b>${fmtMoney(runGrand + lfGrand + schedGrand)}/day</b>${webGrand + quizGrand > 0 ? ` (plus ${fmtMoney(webGrand + quizGrand)}/day webinar/quiz, not shown)` : ''}</div>
       <details class="budget-details">
         <summary>Show every ad set &amp; campaign (${lineCount} line items)</summary>
         <table class="bgt-table">
