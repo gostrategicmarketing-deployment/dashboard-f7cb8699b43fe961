@@ -422,7 +422,7 @@
     Everything Else <b>College Funding Calls</b> = bookings on the GoHighLevel calendars embedded in the three Book-A-Call funnel pages (College Legetty /meta, Event Legetty /meta, Real Estate CFS home), read off those pages on every refresh and matched by calendar ID so a renamed or swapped calendar still counts, counted on the day they were booked (Mountain time, cancellations included; Google, YouTube and organic-search bookings excluded). <b>Only calls booked from a funnel page location count</b> (Phil 2026-11-16): legetty.com and realestatecollegefundingsecrets.com pages, judged by the page the contact booked from. Bookings made through a direct calendar link (bookings.collegefundingsecrets.com/widget/...) are left out, so the number matches the opt-ins in GHL's funnel stats. Refreshed about every 5 minutes.
     If that feed is unavailable or over an hour old, it falls back to the Meta <code>Schedule</code> event ("Website schedules") and is tagged <span class="src-tag meta">Meta</span>.
     The per-account rows are always Meta schedules, because GHL cannot split a booking by ad account.
-    Link Clicks = <code>inline_link_clicks</code>. Data pulled live from Meta Graph API v21.0 directly from your browser.
+    Link Clicks = <code>inline_link_clicks</code>. Data pulled live from Meta Graph API v25.0 directly from your browser.
   </div>
 
 </div>
@@ -517,7 +517,7 @@ function isLeadFormCampaign(name, id) {
 async function fetchCampaignInsights(actId, preset) {
   // Pull at campaign level so we can bucket May Webinar vs Everything Else.
   // date_preset only returns campaigns with spend in the window — keeps response small.
-  const url = new URL(`https://graph.facebook.com/v21.0/${actId}/insights`);
+  const url = new URL(`https://graph.facebook.com/v25.0/${actId}/insights`);
   url.searchParams.set("date_preset", preset);
   url.searchParams.set("level", "campaign");
   url.searchParams.set("fields", "campaign_id,campaign_name,spend,inline_link_clicks,impressions,actions,conversions");
@@ -1086,7 +1086,7 @@ function render(accounts, ghl) {
 // effective_status ACTIVE are already excluded when their parent is paused.
 // ============================================================================
 async function pullEdge(actId, edge, fields, opts) {
-  const url = new URL(`https://graph.facebook.com/v21.0/${actId}/${edge}`);
+  const url = new URL(`https://graph.facebook.com/v25.0/${actId}/${edge}`);
   url.searchParams.set("fields", fields);
   if (!(opts && opts.noStatusFilter)) url.searchParams.set("effective_status", '["ACTIVE"]');
   url.searchParams.set("limit", "500");
